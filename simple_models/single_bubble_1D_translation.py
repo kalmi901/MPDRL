@@ -284,7 +284,7 @@ class SingleBubble:
         self.cp[4] = 4.0 * VIS / RHO / (R0**2.0) * (2.0* np.pi / wr)
         self.cp[5] = ((2.0 * np.pi / R0 / wr)**2.0) / RHO
         self.cp[6] = ((2.0 * np.pi / wr)** 2.0) / CL / RHO / R0
-        self.cp[7] = R0 * w1 / (2 * np.pi) / CL
+        self.cp[7] = R0 * wr / (2 * np.pi) / CL
         self.cp[8] = 3.0 * PE
 
         # Physical Parameters
@@ -313,7 +313,7 @@ class SingleBubble:
 
     
 if __name__ == "__main__":
-    R0   = 30.0
+    R0   = 140.0
     PA   = [0.7, 0.0]
     FREQ = [25.0, 50.0]
     model = SingleBubble(R0, FREQ, PA, AC_FIELD="SW")

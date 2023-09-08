@@ -5,8 +5,9 @@ import matplotlib.pyplot as plt
 
 
 # GLOBAL (CONSTANT) PARAMETERS
-RE   = 60                   # Equilbirum Radius (micron)
+RE   = 110                  # Equilbirum Radius (micron)
 FREQ = [25.0, 50.0]         # Excittion frequencies (kHz)
+REL_FREQ = 25.0             # Relative Frequency (kHz)
 PA0  = [0.8]                # Pressure Amplitude 0 (min, max), (bar)
 PA1  = [0.0]                # Pressure Amplitude 1 (min, max), (bar)
 SCALE = "lin"
@@ -20,7 +21,7 @@ X_RES = 21                  # Resolution of the initial conditions
 # Solver options
 NT  = RES * RES # Number Of Threads
 SD  = 6         # System Dimension (r, u, x, v, Fb1, Fd)
-NCP = 25        # Number Of Control Parameters
+NCP = 27        # Number Of Control Parameters
 NACC = 5        # Number Of Accessories
 SOLVER = "RKCK45"
 BLOCKSIZE = 64
@@ -54,8 +55,8 @@ def fill_solver_object(solver: SolverObject,
 
             # Actual State
             solver.set_host(problem_number, "actual_state", 0, 1.0)     # Dimensionless Radius
-            solver.set_host(problem_number, "actual_state", 1, 0.0)     # Dimensionless Wall velocity
-            solver.set_host(problem_number, "actual_state", 2, x0)      # Dimensionless Position
+            solver.set_host(problem_number, "actual_state", 1, x0)      # Dimensionless Position
+            solver.set_host(problem_number, "actual_state", 2, 0.0)     # Dimensionless Wall velocity
             solver.set_host(problem_number, "actual_state", 3, 0.0)     # Dimensionless Translational velocity
             solver.set_host(problem_number, "actual_state", 4, 0.0)     # Primary Bjerknes Force
             solver.set_host(problem_number, "actual_state", 5, 0.0)     # Drag Force
@@ -65,23 +66,25 @@ def fill_solver_object(solver: SolverObject,
             # Wave length
             l1 = CL / (FREQ[0] * 1000)
             l2 = CL / (FREQ[1] * 1000)
+            lr = CL / (REL_FREQ * 1000)
 
             # Angular Frequency
             w1 = 2.0 * np.pi * (FREQ[0] * 1000)
             w2 = 2.0 * np.pi * (FREQ[1] * 1000)
+            wr = 2.0 * np.pi * (REL_FREQ * 1000)
 
             # Convert to SI Units
             R0 = RE * 1e-6              # Equilbrium radius (m)
             Pinf = P0 * 1e5             # Ambinet Pressures (Pa)
 
-            solver.set_host(problem_number, "control_parameter", 0, (2.0 * ST / R0 + Pinf - PV) * (2.0* np.pi / R0 / w1)**2.0 / RHO)
-            solver.set_host(problem_number, "control_parameter", 1, (1.0 - 3.0*PE) * (2 * ST / R0 + Pinf - PV) * (2.0*np.pi / R0 / w1) / CL / RHO)
-            solver.set_host(problem_number, "control_parameter", 2, (Pinf - PV) * (2.0 *np.pi / R0 / w1)**2.0 / RHO)
-            solver.set_host(problem_number, "control_parameter", 3, (2.0 * ST / R0 / RHO) * (2.0 * np.pi / R0 / w1)**2.0)
-            solver.set_host(problem_number, "control_parameter", 4, 4.0 * VIS / RHO / (R0**2.0) * (2.0* np.pi / w1))
-            solver.set_host(problem_number, "control_parameter", 5, ((2.0 * np.pi / R0 / w1)**2.0) / RHO)
-            solver.set_host(problem_number, "control_parameter", 6, ((2.0 * np.pi / w1)** 2.0) / CL / RHO / R0)
-            solver.set_host(problem_number, "control_parameter", 7, R0 * w1 / (2 * np.pi) / CL)
+            solver.set_host(problem_number, "control_parameter", 0, (2.0 * ST / R0 + Pinf - PV) * (2.0* np.pi / R0 / wr)**2.0 / RHO)
+            solver.set_host(problem_number, "control_parameter", 1, (1.0 - 3.0*PE) * (2 * ST / R0 + Pinf - PV) * (2.0*np.pi / R0 / wr) / CL / RHO)
+            solver.set_host(problem_number, "control_parameter", 2, (Pinf - PV) * (2.0 *np.pi / R0 / wr)**2.0 / RHO)
+            solver.set_host(problem_number, "control_parameter", 3, (2.0 * ST / R0 / RHO) * (2.0 * np.pi / R0 / wr)**2.0)
+            solver.set_host(problem_number, "control_parameter", 4, 4.0 * VIS / RHO / (R0**2.0) * (2.0* np.pi / wr))
+            solver.set_host(problem_number, "control_parameter", 5, ((2.0 * np.pi / R0 / wr)**2.0) / RHO)
+            solver.set_host(problem_number, "control_parameter", 6, ((2.0 * np.pi / wr)** 2.0) / CL / RHO / R0)
+            solver.set_host(problem_number, "control_parameter", 7, R0 * wr / (2 * np.pi) / CL)
             solver.set_host(problem_number, "control_parameter", 8, 3.0 * PE)
 
             # Physical Parameters
@@ -94,17 +97,19 @@ def fill_solver_object(solver: SolverObject,
 
             # Parameters for translation
             solver.set_host(problem_number, "control_parameter", 15, (l1 / R0)**2)
-            solver.set_host(problem_number, "control_parameter", 16, (2.0 * np.pi) / RHO / R0 / l1 / (w1 * R0)**2.0)
+            solver.set_host(problem_number, "control_parameter", 16, (2.0 * np.pi) / RHO / R0 / l1 / (wr * R0)**2.0)
             solver.set_host(problem_number, "control_parameter", 17, 4 * np.pi / 3.0 * R0**3.0)
             solver.set_host(problem_number, "control_parameter", 18, 12 * np.pi * VIS * R0)
 
             # Acoustic field properties
             solver.set_host(problem_number, "control_parameter", 19, 2 * np.pi / l1)        # k1 wavenumber
             solver.set_host(problem_number, "control_parameter", 20, 2 * np.pi / l2)        # k2 wavenumber
-            solver.set_host(problem_number, "control_parameter", 21, l1)                    # wavelength
-            solver.set_host(problem_number, "control_parameter", 22, l2)                    # wavelength
-            solver.set_host(problem_number, "control_parameter", 23, 1.0 / RHO / CL)        # impeadance? 
+            solver.set_host(problem_number, "control_parameter", 21, 1.0 / l1)              # wavelength
+            solver.set_host(problem_number, "control_parameter", 22, 1.0 / l2)              # wavelength
+            solver.set_host(problem_number, "control_parameter", 23, 1.0 / RHO / CL)        # Ac. Impedance 
             solver.set_host(problem_number, "control_parameter", 24, CL)                    # Reference velocity
+            solver.set_host(problem_number, "control_parameter", 25, 1.0 / wr)              # Reference frequency
+            solver.set_host(problem_number, "control_parameter", 26, lr)                    # Reference length
 
             problem_number += 1
 
