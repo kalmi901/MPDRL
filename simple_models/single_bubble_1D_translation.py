@@ -313,14 +313,14 @@ class SingleBubble:
 
     
 if __name__ == "__main__":
-    R0   = 140.0
-    PA   = [0.7, 0.0]
+    R0   = 60.0
+    PA   = [2.7, 0.0]
     FREQ = [25.0, 50.0]
     model = SingleBubble(R0, FREQ, PA, AC_FIELD="SW")
     model.x0 = 0.123
-    model.T = 5000
-    t, _, x, _, _ = model.integrate()
-    plt.plot(t, x, "k-")
+    model.T = 200
+    t, r, x, _, _ = model.integrate()
+    plt.plot(t, r, "k-")
     plt.show()
 
     
