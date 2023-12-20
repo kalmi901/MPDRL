@@ -1,6 +1,6 @@
-from envs.bubble_env_gpu import BubbleVecEnv
+from envs import Pos1DControl
 
 
 
 if __name__ == "__main__":
-    venc = BubbleVecEnv(1)
+    venc = Pos1DControl(1024)

@@ -7,16 +7,15 @@ from abc import ABC, abstractmethod
 import torch
 from typing import Any
 
-from common import Space
+from .common import Space
 
 
-
-class BubbleVecEnv(ABC):
+class BubbleGPUEnv(ABC):
 
     def __init__(self, 
                  num_envs: int,
-                 single_action_space: Space,
-                 single_observation_space: Space) -> None:
+                 single_action_space: Space = None,
+                 single_observation_space: Space = None) -> None:
         
         
         self.num_envs = num_envs

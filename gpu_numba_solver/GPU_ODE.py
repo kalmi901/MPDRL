@@ -3,9 +3,12 @@ from numba import cuda
 import numpy as np
 import math
 from typing import Union
-import importlib
+from types import ModuleType
 
-from System_Definition_Template import *
+try:
+    from gpu_numba_solver.System_Definition_Template import *
+except:
+    from System_Definition_Template import *
 
 
 # ---------------------------------------------------------------
@@ -24,12 +27,10 @@ CUDA_JIT_PROPERTIES = {
 # Try not to modify
 __SYSTEM_DEF_FUNCTIONS = ["per_thread_ode_function", "per_thread_action_after_timesteps", "per_thread_initialization", "per_thread_finalization"]
 
-# utils ------
-def _update_system_definition(system_definition):
-    module = importlib.import_module(system_definition)
+def setup(system_definition: ModuleType):
     for func_name in __SYSTEM_DEF_FUNCTIONS:
-        if hasattr(module, func_name):
-            globals()[func_name] = getattr(module, func_name)
+        if hasattr(system_definition, func_name):
+            globals()[func_name] = getattr(system_definition, func_name)
 
 
 
@@ -44,12 +45,13 @@ class SolverObject():
                 method : str = "RKCK45",
                 abs_tol : Union[list, float] = None,
                 rel_tol : Union[list, float] = None,
-                system_definition: str = None
+                min_step: float = 1e-16,
+                max_step: float = 1.0e6,
+                init_step:float = 1e-2,
+                growth_limit:float = 5.0,
+                shrink_limit:float = 0.1,
                 ):
         
-        # ----- Update system definition --------
-        if system_definition is not None:
-            _update_system_definition(system_definition)
 
         # ----- Constant (private) properties -------------
         self._system_dimension = system_dimension
@@ -86,11 +88,11 @@ class SolverObject():
         assert len(self._rel_tol) == system_dimension
 
         # ----- Public properties with default values ----
-        self.time_step_init         = 1e-2
-        self.time_step_max          = 1.0e6
-        self.time_step_min          = 1.0e-12
-        self.time_step_growth_limit = 5.0
-        self.time_step_shrink_limit = 0.1
+        self.time_step_init         = init_step
+        self.time_step_max          = max_step
+        self.time_step_min          = min_step
+        self.time_step_growth_limit = growth_limit
+        self.time_step_shrink_limit = shrink_limit
 
 
         # ----- Constant (private) array sizes -----

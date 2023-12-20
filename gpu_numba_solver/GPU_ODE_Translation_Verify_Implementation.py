@@ -1,10 +1,15 @@
 import numpy as np
 import time
+from system_definitions import KM1D
+import GPU_ODE
+GPU_ODE.setup(KM1D)
+
 from GPU_ODE import SolverObject
 import matplotlib.pyplot as plt
 
 
 # GLOBAL (CONSTANT) PARAMETERS
+SYSTEM_DEFINITION = "KM1D"
 RE   = 110                  # Equilbirum Radius (micron)
 FREQ = [25.0, 50.0]         # Excittion frequencies (kHz)
 REL_FREQ = 25.0             # Relative Frequency (kHz)
@@ -96,8 +101,8 @@ def fill_solver_object(solver: SolverObject,
             solver.set_host(problem_number, "control_parameter", 14, R0)
 
             # Parameters for translation
-            solver.set_host(problem_number, "control_parameter", 15, (l1 / R0)**2)
-            solver.set_host(problem_number, "control_parameter", 16, (2.0 * np.pi) / RHO / R0 / l1 / (wr * R0)**2.0)
+            solver.set_host(problem_number, "control_parameter", 15, (lr / R0)**2)
+            solver.set_host(problem_number, "control_parameter", 16, (2.0 * np.pi) / RHO / R0 / lr / (wr * R0)**2.0)
             solver.set_host(problem_number, "control_parameter", 17, 4 * np.pi / 3.0 * R0**3.0)
             solver.set_host(problem_number, "control_parameter", 18, 12 * np.pi * VIS * R0)
 
@@ -125,8 +130,7 @@ if __name__ == "__main__":
                           method=SOLVER,
                           threads_per_block=BLOCKSIZE,
                           abs_tol=ATOL,
-                          rel_tol=RTOL,
-                          system_definition="System_Definition_KM1D")    
+                          rel_tol=RTOL)    
     solver.time_step_min = 1e-10
 
     time_domain = np.array(TIME_DOMAIN, dtype=np.float64)
