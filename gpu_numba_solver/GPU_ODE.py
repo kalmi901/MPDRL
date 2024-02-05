@@ -25,7 +25,12 @@ CUDA_JIT_PROPERTIES = {
 
 
 # Try not to modify
-__SYSTEM_DEF_FUNCTIONS = ["per_thread_ode_function", "per_thread_action_after_timesteps", "per_thread_initialization", "per_thread_finalization"]
+__SYSTEM_DEF_FUNCTIONS = ["per_thread_ode_function",
+                          "per_thread_action_after_timesteps",
+                          "per_thread_initialization",
+                          "per_thread_finalization",
+                          "per_thread_event_function",
+                          "per_thread_action_after_event_detection"]
 
 def setup(system_definition: ModuleType):
     for func_name in __SYSTEM_DEF_FUNCTIONS:
@@ -41,10 +46,13 @@ class SolverObject():
                 system_dimension  : int,
                 number_of_control_parameters : int,
                 number_of_accessories : int = 1,
+                number_of_events: int = 0,
                 threads_per_block : int = 64,
                 method : str = "RKCK45",
                 abs_tol : Union[list, float] = None,
                 rel_tol : Union[list, float] = None,
+                event_tol: Union[list, float] = None,
+                event_dir: Union[list, int] = None,
                 min_step: float = 1e-16,
                 max_step: float = 1.0e6,
                 init_step:float = 1e-2,
@@ -58,6 +66,7 @@ class SolverObject():
         self._number_of_threads = number_of_threads
         self._number_of_control_parameters = number_of_control_parameters
         self._number_of_accessories = number_of_accessories
+        self._number_of_events = number_of_events
         self._threads_per_block = threads_per_block
         self._blocks_per_grid = self._number_of_threads // self._threads_per_block + (0 if self._number_of_threads % self._threads_per_block == 0 else 1 )
         self._method = method
@@ -84,8 +93,24 @@ class SolverObject():
         else:
             self._rel_tol = np.full((system_dimension, ), abs_tol, dtype=np.float64)
 
+        if event_tol is None:
+            self._event_tol = np.full((max(number_of_events, 1), ), 1e-8, dtype=np.float64)
+        elif type(event_tol) == list:
+            self._event_tol = np.array(event_tol, dtype=np.float64)
+        else:
+            self._event_tol = np.full((max(number_of_events, 1), ), event_tol, dtype=np.float64)
+
+        if event_dir is None:
+            self._event_dir = np.full((max(number_of_events, 1), ), 0, dtype=np.int32)
+        elif type(event_dir) == list:
+            self._event_dir = np.array(event_dir, dtype=np.int32)
+        else:
+            self._event_dir = np.full((max(number_of_events, 1), ), event_dir, dtype=np.int32)
+
+
         assert len(self._abs_tol) == system_dimension
         assert len(self._rel_tol) == system_dimension
+        assert len(self._event_tol) == max(number_of_events, 1)
 
         # ----- Public properties with default values ----
         self.time_step_init         = init_step
@@ -122,9 +147,12 @@ class SolverObject():
                                                 self._system_dimension,
                                                 self._number_of_control_parameters,
                                                 self._number_of_accessories,
+                                                self._number_of_events,
                                                 self._method,
                                                 self._abs_tol,
-                                                self._rel_tol)
+                                                self._rel_tol,
+                                                self._event_tol,
+                                                self._event_dir)
         
 
     # ---- Interface to call the GPU Kernel function ------
@@ -223,9 +251,12 @@ def _RKCK45_kernel( number_of_threads: int,
                     system_dimension: int,
                     number_of_control_parameters: int,
                     number_of_accessories: int,
+                    number_of_events: int,
                     method : str,
                     abs_tol : np.ndarray,
-                    rel_tol : np.ndarray):
+                    rel_tol : np.ndarray,
+                    event_tol : np.ndarray,
+                    event_dir : np.ndarray):
     
     # CONSTANT PARAMETERS ---------------
     # Create alieses
@@ -233,10 +264,14 @@ def _RKCK45_kernel( number_of_threads: int,
     SD  = system_dimension
     NCP = number_of_control_parameters
     NA  = number_of_accessories
+    NE  = number_of_events
     ALGO = method 
     ATOL = abs_tol
     RTOL = rel_tol
+    ETOL = event_tol
+    EDIR = event_dir
 
+    print(NE)
     # DEVICE FUNCTIONS CALLED IN THE KERNEL
     # -------------------------------------
 
@@ -305,6 +340,47 @@ def _RKCK45_kernel( number_of_threads: int,
 
         return l_update_step, l_terminate_thread, l_new_time_step
 
+
+    # Event Handling -----------------------
+    @cuda.jit(nb.void(
+            nb.int32,
+            nb.float64[:],
+            nb.float64[:],
+            nb.float64,
+            nb.float64,
+            nb.float64,
+            nb.boolean,
+            nb.boolean
+    ), device=True, inline=True)
+    def per_thread_event_time_step_control(tid,
+                                           l_actual_event_value,
+                                           l_next_event_value,
+                                           l_time_step,
+                                           l_new_time_step,
+                                           l_time_step_min,
+                                           l_update_step,
+                                           l_terminate_thread):
+        
+        l_event_time_step = l_time_step
+        l_is_corrected = False
+
+        if( (l_update_step == True) and 
+            (l_terminate_thread == False)):
+            for i in range(NE):
+                if( ( ( l_actual_event_value[i] >  ETOL[i] ) and ( l_next_event_value[i] < -ETOL[i] ) and ( EDIR[i] <= 0 ) ) or
+				    ( ( l_actual_event_value[i] < -ETOL[i] ) and ( l_next_event_value[i] >  ETOL[i] ) and ( EDIR[i] >= 0 ) ) ):
+                        l_event_time_step = min( l_event_time_step, -l_actual_event_value[i] / (l_next_event_value[i]-l_actual_event_value[i]) * l_time_step )
+                        l_is_corrected = True
+                        
+
+        if l_is_corrected == True:
+            if l_event_time_step < l_time_step_min:
+                print("Warning (tid: ", tid, ") : Event can not be detected without reducing the step size below the")
+            else:
+                l_new_time_step = l_event_time_step
+                l_update_step = False
+
+        return l_update_step, l_new_time_step
 
     # STEPPER FUNCTIONS -----------------------------
 
@@ -561,7 +637,9 @@ def _RKCK45_kernel( number_of_threads: int,
             l_next_state = cuda.local.array((SD, ), dtype=nb.float64)
             l_error = cuda.local.array((SD, ), dtype=nb.float64)
             l_control_parameter = cuda.local.array((NCP, ), dtype=nb.float64)
-            l_accessories = cuda.local.array((NA, ), dtype=nb.float64)
+            l_accessories = cuda.local.array((NA, ) if NA !=0 else (1, ), dtype=nb.float64)
+            l_actual_event_value = cuda.local.array((NE, ) if NE !=0 else (1, ), dtype=nb.float64)
+            l_next_event_value = cuda.local.array((NE, ) if NE !=0 else (1, ), dtype=nb.float64)
 
             for i in nb.prange(2):
                 l_time_domain[i] = time_domain[tid + i*NT]
@@ -578,7 +656,8 @@ def _RKCK45_kernel( number_of_threads: int,
             l_actual_time = l_time_domain[0]
             l_time_step = time_step_init
             l_new_time_step = time_step_init
-            l_terminate = False      
+            l_terminate = False    
+            l_event_terminal = False 
     
             # INITIALIZATION
             per_thread_initialization(
@@ -588,6 +667,15 @@ def _RKCK45_kernel( number_of_threads: int,
                             l_actual_state,
                             l_accessories,
                             l_control_parameter)
+            
+            if NE > 0:
+                per_thread_event_function(  tid,
+                                            l_actual_time,
+                                            l_actual_event_value,
+                                            l_actual_state,
+                                            l_accessories,
+                                            l_control_parameter)
+
             cuda.syncthreads()
             while l_terminate == False:
                 
@@ -645,7 +733,27 @@ def _RKCK45_kernel( number_of_threads: int,
                                         l_update_step,
                                         l_is_finite)
 
+                # NEW EVENT VALUE AND TIME STEP CONTROL
+                if NE > 0:
+                    per_thread_event_function(
+                                        tid,
+                                        l_actual_time+l_time_step,
+                                        l_next_event_value,
+                                        l_next_state,
+                                        l_accessories,
+                                        l_control_parameter)
 
+                    l_update_step, \
+                    l_new_time_step = per_thread_event_time_step_control(
+                                        tid,
+                                        l_actual_event_value,
+                                        l_next_event_value,
+                                        l_time_step,
+                                        l_new_time_step,
+                                        time_step_min,
+                                        l_update_step,
+                                        l_terminate)
+                       
                 # SUCCESFULL TIMESTEPPING UPDATE TIME AND STATE
                 if l_update_step == True:
                     l_actual_time += l_time_step
@@ -654,14 +762,37 @@ def _RKCK45_kernel( number_of_threads: int,
                         l_actual_state[i] = l_next_state[i]
 
                     # ACTION AFTER SUCCESFULL TIMESTEP
-                    per_thread_action_after_timesteps(
+                    l_user_terminal = per_thread_action_after_timesteps(
                                         tid,
                                         l_actual_time,
                                         l_actual_state,
                                         l_accessories,
                                         l_control_parameter)
 
-                    if l_time_domain_ends:
+                    if NE > 0:
+                        l_event_terminal = False
+                        for i in range(NE):
+                            if( ( ( l_actual_event_value[i] >  ETOL[i] ) and ( abs(l_next_event_value[i]) < ETOL[i] ) and ( EDIR[i] <= 0 ) ) or
+							    ( ( l_actual_event_value[i] < -ETOL[i] ) and ( abs(l_next_event_value[i]) < ETOL[i] ) and ( EDIR[i] >= 0 ) ) ):
+                                if per_thread_action_after_event_detection(
+                                    tid,
+                                    i,
+                                    l_actual_time,
+                                    l_time_domain,
+                                    l_actual_state,
+                                    l_accessories,
+                                    l_control_parameter):
+                                    l_event_terminal = True
+                                
+                        per_thread_event_function(
+                            tid,
+                            l_actual_time,
+                            l_actual_event_value,
+                            l_actual_state,
+                            l_accessories,
+                            l_control_parameter)
+
+                    if l_time_domain_ends or l_event_terminal or l_user_terminal:
                         l_terminate = True
 
             # FINALIZATION ------------------------------------
