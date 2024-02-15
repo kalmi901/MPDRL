@@ -70,7 +70,7 @@ By substituting the above expressions into the original Keller--Miksis equation 
 
 $\left(1 - \dfrac{\dot{R}}{c_L} \right)R\ddot{R} + \left(1 -\dfrac{\dot{R}}{3c_L}\right)\dfrac{3}{2}\dot{R}^2 = \\
 \left(1 + \dfrac{\dot{R}}{c_L}\right) \cdot \dfrac{1}{\rho_L} \left(p_{G0}\left(\dfrac{R_0}{R}\right)^{3\gamma}+p_v-\dfrac{2\sigma}{R} - 4\mu_L\dfrac{\dot{R}}{R} - p_0 - p_A(t) \right) \\
-+\dfrac{R}{c_L\rho_L}\left(-3\gamma p_{G0}\left(\dfrac{R_0}{R} \right)^{3\gamma} \dfrac{\dot{R}}{R} + \dfrac{2\sigma}{R^2}\dot{R} + 4\mu_L \left(\dfrac{\dot{R}}{R}\right)^2- 4\mu_L\dfrac{\ddot{R}}{R} - \dot{p}_A(t)\right) $
++\dfrac{R}{c_L\rho_L}\left(-3\gamma p_{G0}\left(\dfrac{R_0}{R} \right)^{3\gamma} \dfrac{\dot{R}}{R} + \dfrac{2\sigma}{R^2}\dot{R} + 4\mu_L \left(\dfrac{\dot{R}}{R}\right)^2- 4\mu_L\dfrac{\ddot{R}}{R} - \dot{p}_A(t)\right)$
 
 
 Observe that some terms containing surface tension and viscosity could be simplified, then rearranging the equation yields
@@ -90,11 +90,11 @@ where
 
 $N_{KM}= 
 \left(1 + \dfrac{\dot{R}}{c_L}\right) \cdot \dfrac{1}{\rho_L} \left(p_{G0}\left(\dfrac{R_0}{R}\right)^{3\gamma}+p_v-\dfrac{2\sigma}{R} - 4\mu_L\dfrac{\dot{R}}{R} - p_0 - p_A(t) \right) \\
-+\dfrac{R}{c_L\rho_L}\left(-3\gamma p_{G0}\left(\dfrac{R_0}{R} \right)^{3\gamma} \dfrac{\dot{R}}{R} + \dfrac{2\sigma}{R^2}\dot{R} + 4\mu_L \left(\dfrac{\dot{R}}{R}\right)^2- 4\mu_L\dfrac{\ddot{R}}{R} - \dot{p}_A(t)\right) $
++\dfrac{R}{c_L\rho_L}\left(-3\gamma p_{G0}\left(\dfrac{R_0}{R} \right)^{3\gamma} \dfrac{\dot{R}}{R} + \dfrac{2\sigma}{R^2}\dot{R} + 4\mu_L \left(\dfrac{\dot{R}}{R}\right)^2- 4\mu_L\dfrac{\ddot{R}}{R} - \dot{p}_A(t)\right)$
 
 and
 
-$D_{KM} = 1 - \dfrac{\dot{R}}{c_L} + \dfrac{4\mu_L}{c_L\rho_LR} $
+$D_{KM} = 1 - \dfrac{\dot{R}}{c_L} + \dfrac{4\mu_L}{c_L\rho_LR}$
 
 ### Dimensionless Variables
 
@@ -138,9 +138,9 @@ where
 
 $\tilde{N}_{KM}= \dfrac{1}{R_0^2}\left(\dfrac{2\pi}{\omega_r}\right)^2 N_{KM} = \left(\dfrac{p_{G0}}{\rho_LR_{0}^2}\left(\dfrac{2\pi}{\omega_r} \right)^2 + (1-3\gamma)\dfrac{p_{G0}}{\rho_LR_0c_L}\dfrac{2\pi}{\omega_r}y' \right)\left(\dfrac{1}{y} \right)^{3\gamma} \\
 -\dfrac{p_0-p_v}{\rho_LR_q^2}\left(\dfrac{2\pi}{\omega_r}\right)^2\left(1+ \dfrac{R_0}{c_L}\dfrac{\omega_R}{2\pi}y' \right) -\dfrac{2\sigma}{\rho_LR_0^3}\left( \dfrac{2\pi}{\omega_r}\right)^2 \dfrac{1}{y} - \dfrac{4\mu_L}{\rho_LR_0^2}\dfrac{2\pi}{\omega_r}\dfrac{y'}{y} \\
--\left(1 - \dfrac{R_0}{3c_L}\dfrac{\omega_r}{2\pi}y'\right) \dfrac{3}{2}y'^2 -\left(1 + \dfrac{R_0}{c_L}\frac{\omega_r}{2\pi}\right)\dfrac{1}{\rho_L R_0^2}\left(\dfrac{2\pi}{\omega_r} \right)^2p_{A}(\tau)-\dfrac{1}{\rho_Lc_LR_0}\left(\dfrac{2\pi}{\omega_r} \right)^2\dot{p}_{A}(\tau)y $
+-\left(1 - \dfrac{R_0}{3c_L}\dfrac{\omega_r}{2\pi}y'\right) \dfrac{3}{2}y'^2 -\left(1 + \dfrac{R_0}{c_L}\frac{\omega_r}{2\pi}\right)\dfrac{1}{\rho_L R_0^2}\left(\dfrac{2\pi}{\omega_r} \right)^2p_{A}(\tau)-\dfrac{1}{\rho_Lc_LR_0}\left(\dfrac{2\pi}{\omega_r} \right)^2\dot{p}_{A}(\tau)y$
 
-$\tilde{D}_{KM}=y D_{KM} =  y - \dfrac{R_0}{c_L}\dfrac{\omega_r}{2\pi}yy' + \dfrac{4\mu_L}{c_L\rho_LR_0} $
+$\tilde{D}_{KM}=y D_{KM} =  y - \dfrac{R_0}{c_L}\dfrac{\omega_r}{2\pi}yy' + \dfrac{4\mu_L}{c_L\rho_LR_0}$
 
 The pressure excitation and its time derivative are
 
@@ -156,7 +156,7 @@ The above derived dimensionless Keller--Miksis equation is rewritten into a firs
 
 $x_0'=x_1$
 
-$x_1'=\dfrac{\tilde{N}_{KM}}{\tilde{D}_{KM}}$
+$$x_1'=\dfrac{\tilde{N}_{KM}}{\tilde{D}_{KM}}$$
 
 where 
 
@@ -203,6 +203,6 @@ $C_{9}=1/\omega_r$
 
 $C_{10+i}=P_{Ai}$
 
-$C_{10+k+i}=\omega_i $
+$C_{10+k+i}=\omega_i$
 
 $C_{10+2k+i}=\theta_i$
