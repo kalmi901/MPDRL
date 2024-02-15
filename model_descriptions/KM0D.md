@@ -128,11 +128,11 @@ $\ddot{R}=y''\cdot R_0 \left(\dfrac{\omega_r}{2\pi}\right)^2$
 
 Let us substitute the dimensionless variables into the modified form of the Keller--Miksis equation
 
-$D_{KM} R_{0}^2\left( \dfrac{\omega_r}{2\pi} \right)^2 yy'' = N_{KM},$
+$D_{KM} R_{0}^2\left( \dfrac{\omega_r}{2\pi} \right)^2 yy'' = N_{KM}$,
 
 then multiplying the equation with $\dfrac{1}{R_0^2}\left( \dfrac{2\pi}{\omega_r} \right)^2$ yields:
 
-$\tilde{D}_{KM} y'' = \tilde{N}_{KM},$
+$\tilde{D_{KM}} y'' = \tilde{N_{KM}}$,
 
 where
 
@@ -156,22 +156,22 @@ The above derived dimensionless Keller--Miksis equation is rewritten into a firs
 
 $x_0'=x_1$
 
-$$x_1'=\dfrac{\tilde{N}_{KM}}{\tilde{D}_{KM}}$$
+$x_1'=\dfrac{\tilde{N}_{KM}}{\tilde{D}_{KM}}$
 
 where 
 
 $\tilde{N}_{KM}=\left(C_{0}+C_{1} x_1 \right)\left(\dfrac{1}{x_0}\right)^{C_8} - C_2 \left(1 +C_7 x_1\right) -C_3 \dfrac{1}{y_0}-C_4\dfrac{x_1}{y_0} \\
--\left(1 - \dfrac{C_7}{3}\right)\dfrac{3}{2}x_1^2 - (1 + C_7x_1)C_5p_A(\tau)-C_6\dot{p}_A(\tau)x_0,$
+-\left(1 - \dfrac{C_7}{3}\right)\dfrac{3}{2}x_1^2 - (1 + C_7x_1)C_5p_A(\tau)-C_6\dot{p}_A(\tau)x_0$
 
 and
 
-$\tilde{D}_{KM}=x_0-C_7x_0x_1+C_4C_7.$
+$\tilde{D}_{KM}=x_0-C_7x_0x_1+C_4C_7$.
 
 The pressure excitation and its time derivative are
 
 $p_{A}(\tau) =\sum\limits_{i=0}^k \cdot \sin\left(2\pi C_{9}C_{10+k+i} \tau + C_{10+2k+i} \right)$ 
 
-$\dot{p}_{A}(\tau) = \sum\limits_{i=0}^k C_{10+i} C_{10+k+i} \cdot \cos\left(2\pi C_{9}C_{10+k+i} \tau + C_{10+2k+i} \right),$ 
+$\dot{p}_{A}(\tau) = \sum\limits_{i=0}^k C_{10+i} C_{10+k+i} \cdot \cos\left(2\pi C_{9}C_{10+k+i} \tau + C_{10+2k+i} \right)$, 
 
 respectively. Note that $k$ is the number of harmonic components.
 
