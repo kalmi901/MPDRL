@@ -8,23 +8,21 @@ import numba as nb
 import pandas as pd
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
-from typing import List, Optional, Callable
+from typing import List, Callable
 
-# MATERIAL PROPERTIES
-PV = 3.166775638952003e+03;         # Vapour Pressures [PA]
-RHO= 9.970639504998557e+02;         # Liquid Density [kg/m**3]
-ST = 0.071977583160056;             # Surface Tension [N/m]
+# MATERIAL PROPERTIES (SI Units)
+PV = 3.166775638952003e+03          # Vapour Pressures [PA]
+RHO= 9.970639504998557e+02          # Liquid Density [kg/m**3]
+ST = 0.071977583160056              # Surface Tension [N/m]
 VIS= 8.902125058209557e-04          # Liquid Viscosity [Pa s]
 CL = 1.497251785455527e+03          # Liquid Sound Speed [m/s]
-P0 = 1.0                            # Ambient Pressure [bar]
+P0 = 1.0e5                          # Ambient Pressure [Pa]
 PE = 1.4                            # Polytrophic Exponent [-]
 
 
 
 # Try not to modify
 __ODE_FUN_SIG = nb.float64[:](nb.float64, nb.float64[:], nb.float64[:])
-
-
 
 @nb.njit(__ODE_FUN_SIG)
 def _ode_function(t, x, cp):
@@ -37,7 +35,7 @@ def _ode_function(t, x, cp):
         cp (float64[:]) - Control Parameters \n
 
     Retursn: \n
-        dx (float64[:]) - dx/dy = f(x, t)
+        dx (float64[:]) - dx/dt = f(x, t)
 
     ODE System ----- \n
 
@@ -67,9 +65,10 @@ class SingleBubble:
                  FREQ: float,
                  PA: float) -> None:
         
-        self._FREQ  = FREQ
-        self._PA    = PA
-        self._R0    = R0
+        # Convert to SI Units
+        self._FREQ  = FREQ * 1000
+        self._PA    = PA * 1e5
+        self._R0    = R0 * 1e-6
 
         # Initial Conditions
         self.r0     = 1.0   # Initial Bubble Radius
@@ -103,10 +102,11 @@ class SingleBubble:
             
             self.r0 = res.y[0][-1]
             self.u0 = res.y[1][-1]
+            self.t0 = res.t[-1]
 
 
         res = solve_ivp(fun=_ode_function,
-                        t_span=[self.t0+1e-6, self.T],
+                        t_span=[self.t0, self.T],
                         y0=[self.r0, self.u0],
                         args=(self.cp, ),
                         method='LSODA',
@@ -123,17 +123,14 @@ class SingleBubble:
     def _update_control_parameters(self):
 
         # Convert To SI Units
-        w       = self._FREQ * 1000 * 2 * np.pi
-        R0      = self._R0 * 1e-6
-        Pinf    = P0 * 1e5
-        Pa      = self._PA * 1e5
+        w  = self._FREQ * 2 * np.pi
 
-        self.cp[0] = (PV - Pinf) / RHO * (2 * np.pi / w / R0)**2
-        self.cp[1] = (2.0 * ST / R0 + Pinf - PV) / RHO * (2 * np.pi / w / R0)**2
+        self.cp[0] = (PV - P0) / RHO * (2 * np.pi / w / self._R0)**2
+        self.cp[1] = (2.0 * ST / self._R0 + P0 - PV) / RHO * (2 * np.pi / w / self._R0)**2
         self.cp[2] = 3.0 * PE
-        self.cp[3] = 2.0 * ST / RHO / R0 * (2 * np.pi / w / R0)**2
-        self.cp[4] = 4.0 * VIS / RHO / (R0**2) * (2 * np.pi / w)
-        self.cp[5] = Pa / RHO * (2 * np.pi / w / R0)**2
+        self.cp[3] = 2.0 * ST / RHO / self._R0 * (2 * np.pi / w / self._R0)**2
+        self.cp[4] = 4.0 * VIS / RHO / (self._R0**2) * (2 * np.pi / w)
+        self.cp[5] = self._PA / RHO * (2 * np.pi / w / self._R0)**2
 
 
 

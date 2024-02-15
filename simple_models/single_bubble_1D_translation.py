@@ -296,8 +296,8 @@ class SingleBubble:
         self.cp[14] = R0
 
         # Parameters for translation
-        self.cp[15] = (l1 / R0)**2
-        self.cp[16] = (2.0 * np.pi) / RHO / R0 / l1 / (wr * R0)**2.0
+        self.cp[15] = (lr / R0)**2
+        self.cp[16] = (2.0 * np.pi) / RHO / R0 / lr / (wr * R0)**2.0
         self.cp[17] = 4 * np.pi / 3.0 * R0**3.0
         self.cp[18] = 12 * np.pi * VIS * R0
 
