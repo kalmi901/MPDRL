@@ -24,12 +24,12 @@ where $R$ is the time dependent bubble radius, $\rho_L$ is the liquid density $c
 
 The acoustic field is the sum of the ambinent pressure $p_0$ and the pressure excitatation $p_A(t)$:
 
-$ p_\infty(t) = p_0 + p_A(t) $
+$p_\infty(t) = p_0 + p_A(t)$
 
 
 The excitation pressure is a sum of $k$ harmonic components
 
-$p_{A}(t) = \sum_{i=0}^kP_{Ai} \cdot \sin(\omega_i t + \theta_i),$ 
+$p_{A}(t) = \sum\limits_{i=0}^k P_{Ai} \cdot \sin(\omega_i t + \theta_i),$ 
 
 where $P_{Ai}$ and $\omega_i$ is the pressure amplitude and the driving frequecy of component $i$, $\theta_i$ is the phase shift between the excitation components and $k$ is the number of harmonic components.
 
@@ -37,7 +37,7 @@ where $P_{Ai}$ and $\omega_i$ is the pressure amplitude and the driving frequecy
 
 The liquid pressure at the bubble wall is written as
 
-$ p_L = p_G + p_v - \dfrac{2\sigma}{R} - 4\mu_L \dfrac{\dot{R}}{R},$
+$p_L = p_G + p_v - \dfrac{2\sigma}{R} - 4\mu_L \dfrac{\dot{R}}{R},$
 
 where $p_G$ is the partial pressure of the gas content and $p_v$ is the partial pressure of the vapour. $\sigma$ is the surface tension and $\mu_L$ is the liquid viscosity.
 
@@ -56,15 +56,15 @@ $p_{G0}=\left(p_0 - p_v + \dfrac{2\sigma}{R_0} \right)$
 
 First, the time derivatives are calculated.
 
-$ \dfrac{dp_{G}}{dt} = \dot{p}_{G}= -3\gamma p_{G0} \left( \dfrac{R_0}{R} \right)^{3\gamma-1}\dfrac{R_0}{R^2}\dot{R}=-3\gamma p_{G0} \left( \dfrac{R_0}{R} \right)^{3\gamma}\dfrac{\dot{R}}{R}$
+$\dfrac{dp_{G}}{dt} = \dot{p}_{G}= -3\gamma p_{G0} \left( \dfrac{R_0}{R} \right)^{3\gamma-1}\dfrac{R_0}{R^2}\dot{R}=-3\gamma p_{G0} \left( \dfrac{R_0}{R} \right)^{3\gamma}\dfrac{\dot{R}}{R}$
 
-$ \dfrac{dp_{L}}{dt} = \dot{p}_L = \dot{p}_{G} + \dfrac{2\sigma}{R^2}\dot{R} + 4\mu_l\left( \dfrac{\dot{R}}{R}\right)^2 - 4\mu_L \dfrac{\ddot{R}}{R}$
+$\dfrac{dp_{L}}{dt} = \dot{p}_L = \dot{p}_{G} + \dfrac{2\sigma}{R^2}\dot{R} + 4\mu_l\left( \dfrac{\dot{R}}{R}\right)^2 - 4\mu_L \dfrac{\ddot{R}}{R}$
 
 $\dfrac{p_\infty}{dt}=\dot{p}_{\infty} = 0+ \dot{p}_{A}(t),$
 
 where 
 
-$ \dot{p}_A(t) = \sum_{i=0}^k\omega_i P_{Ai}\cdot\cos(\omega_i t + \theta_i),$ 
+$\dot{p}_A(t) = \sum\limits_{i=0}^k\omega_i P_{Ai}\cdot\cos(\omega_i t + \theta_i),$ 
 
 By substituting the above expressions into the original Keller--Miksis equation one obtains
 
@@ -144,9 +144,9 @@ $\tilde{D}_{KM}=y D_{KM} =  y - \dfrac{R_0}{c_L}\dfrac{\omega_r}{2\pi}yy' + \dfr
 
 The pressure excitation and its time derivative are
 
-$p_{A}(\tau) = \sum_{i=0}^k P_{Ai} \cdot \sin\left(2\pi\dfrac{\omega_i}{\omega_r} \tau + \theta_i \right)$ 
+$p_{A}(\tau) = \sum\limits_{i=0}^k P_{Ai} \cdot \sin\left(2\pi\dfrac{\omega_i}{\omega_r} \tau + \theta_i \right)$ 
 
-$\dot{p}_{A}(\tau) = \sum_{i=0}^k \omega_i P_{Ai} \cdot \cos\left(2\pi\dfrac{\omega_i}{\omega_r} \tau + \theta_i \right),$ 
+$\dot{p}_{A}(\tau) = \sum\limits_{i=0}^k \omega_i P_{Ai} \cdot \cos\left(2\pi\dfrac{\omega_i}{\omega_r} \tau + \theta_i \right),$ 
 
 respectively.
 
@@ -154,35 +154,24 @@ respectively.
 
 The above derived dimensionless Keller--Miksis equation is rewritten into a first order system and a set of pre-computed constans $C_k$ are introduced as in paper [2]. The state vector is $\mathbf{x}^T=[y, y']$; thus, the first-order system is
 
-$
-\left[\begin{array}{c} 
-x_0' \\
-x_1'
-\end{array}\right] =
-\left[\begin{array}{c} 
-x_1\\ 
-\dfrac{\tilde{N}_{KM}}{\tilde{D}_{KM}}
-\end{array}\right]
-$
+$x_0'=x_1$
+
+$x_1'=\dfrac{\tilde{N}_{KM}}{\tilde{D}_{KM}}$
 
 where 
 
-$
-\tilde{N}_{KM}=\left(C_{0}+C_{1} x_1 \right)\left(\dfrac{1}{x_0}\right)^{C_8} - C_2 \left(1 +C_7 x_1\right) -C_3 \dfrac{1}{y_0}-C_4\dfrac{x_1}{y_0} \\
--\left(1 - \dfrac{C_7}{3}\right)\dfrac{3}{2}x_1^2 - (1 + C_7x_1)C_5p_A(\tau)-C_6\dot{p}_A(\tau)x_0,
-$
+$\tilde{N}_{KM}=\left(C_{0}+C_{1} x_1 \right)\left(\dfrac{1}{x_0}\right)^{C_8} - C_2 \left(1 +C_7 x_1\right) -C_3 \dfrac{1}{y_0}-C_4\dfrac{x_1}{y_0} \\
+-\left(1 - \dfrac{C_7}{3}\right)\dfrac{3}{2}x_1^2 - (1 + C_7x_1)C_5p_A(\tau)-C_6\dot{p}_A(\tau)x_0,$
 
 and
 
-$
-\tilde{D}_{KM}=x_0-C_7x_0x_1+C_4C_7. 
-$
+$\tilde{D}_{KM}=x_0-C_7x_0x_1+C_4C_7.$
 
 The pressure excitation and its time derivative are
 
-$p_{A}(\tau) = \sum_{i=0}^k  \cdot \sin\left(2\pi C_{9}C_{10+k+i} \tau + C_{10+2k+i} \right)$ 
+$p_{A}(\tau) =\sum\limits_{i=0}^k \cdot \sin\left(2\pi C_{9}C_{10+k+i} \tau + C_{10+2k+i} \right)$ 
 
-$\dot{p}_{A}(\tau) = \sum_{i=0}^k C_{10+i} C_{10+k+i} \cdot \cos\left(2\pi C_{9}C_{10+k+i} \tau + C_{10+2k+i} \right),$ 
+$\dot{p}_{A}(\tau) = \sum\limits_{i=0}^k C_{10+i} C_{10+k+i} \cdot \cos\left(2\pi C_{9}C_{10+k+i} \tau + C_{10+2k+i} \right),$ 
 
 respectively. Note that $k$ is the number of harmonic components.
 

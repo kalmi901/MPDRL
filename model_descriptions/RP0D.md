@@ -92,13 +92,6 @@ $C_5 = \dfrac{P_A}{\rho R_0^2}\cdot \left( \dfrac{2\pi}{\omega} \right)^2$
 ## First-order ode system
 For numerical computation the dimensionless Rayleigh--Plesset equation is rewritten into a system of first order differential equations. The state vector is defined as $\mathbf{x}^T=[y, y']$; thus, the first-order system is written as
 
-$
-\left[\begin{array}{c} 
-x_0' \\
-x_1'
-\end{array}\right] =
-\left[\begin{array}{c} 
-x_1\\ 
-C_0+C_1\left( \dfrac{1}{y_0} \right)^{C_2}-C_3 \dfrac{1}{y_0} - C_4 \dfrac{y_1}{y_0}-C_5\sin(2\pi \tau) -\dfrac{3}{2}\dfrac{y_1^2}{y_0}
-\end{array}\right]
-$
+$x_0'=x_1$
+
+$x_1'=\left( \dfrac{1}{x_0} \right)^{C_2}-C_3 \dfrac{1}{x_0} - C_4 \dfrac{x_1}{x_0}-C_5\sin(2\pi \tau) -\dfrac{3}{2}\dfrac{x_1^2}{x_0}$
