@@ -280,15 +280,15 @@ R=y\cdot R_0
 ```
 
 ```math
-z=\xi \cdot \lambda_r
+z=\zeta \cdot \lambda_r
 ```
 
 ```math
-\dot{z}=\xi' \cdot \lambda_r\left(\dfrac{\omega_r}{2\pi}\right) =\xi \cdot c_L
+\dot{z}=\zeta' \cdot \lambda_r\left(\dfrac{\omega_r}{2\pi}\right) =\xi \cdot c_L
 ```
 
 ```math
-\ddot{z}=\xi'' \cdot \lambda_r \left(\dfrac{\omega_r}{2\pi}\right)^2 = \xi \cdot c_L \left(\dfrac{\omega_r}{2\pi} \right)
+\ddot{z}=\zeta'' \cdot \lambda_r \left(\dfrac{\omega_r}{2\pi}\right)^2 = \xi \cdot c_L \left(\dfrac{\omega_r}{2\pi} \right)
 ```
 
 ## Dimensionless Governing Equations
@@ -324,8 +324,8 @@ The state vector is $`\mathbf{x}^T=[y, \zeta, y', \zeta']`$; thus, the first ord
 \begin{align*}
 x_0' &= x_1 \\
 x_1' &= x_2 \\
-x_2' &= \dfrac{1}{\tilde{D}_{KM}}\left(\tilde{N}_{KM} + C_{11}x_3^2\right) \\
-x_3' &= C_{12} \cdot F_{ex}(x_1, \tau) \dfrac{3}{x_0^3} - 3\dfrac{x_3 x_2}{x_0}
+x_2' &= \dfrac{1}{\tilde{D}_{KM}}\left(\tilde{N}_{KM} + C_{8}x_3^2\right) \\
+x_3' &= C_{9} \cdot F_{ex}(x_1, \tau) \dfrac{3}{x_0^3} - 3\dfrac{x_3 x_2}{x_0}
 \end{align*}
 ```
 
@@ -333,16 +333,16 @@ where
 
 ```math
 \begin{align*}
-&\tilde{N}_{KM}=\left(C_{0}+C_{1} x_2 \right)\left(\dfrac{1}{x_0}\right)^{C_8} - C_2 \left(1 +C_7 x_2\right) -C_3 \dfrac{1}{x_0}-C_4\dfrac{x_2}{x_0} \\
+&\tilde{N}_{KM}=\left(C_{0}+C_{1} x_2 \right)\left(\dfrac{1}{x_0}\right)^{S_0} - C_2 \left(1 +C_7 x_2\right) -C_3 \dfrac{1}{x_0}-C_4\dfrac{x_2}{x_0} \\
 &-\left(1 - \dfrac{C_7}{3}\right)\dfrac{3}{2}x_2^2 - (1 + C_7x_2)C_5p_A(x_1, \tau)-C_6\dot{p}_A(x_1, \tau)x_0, \\
 
 &\tilde{D}_{KM}=x_0-C_7x_0x_2+C_4C_7, \\
 
-&F_{ex}(\zeta, \tau) = F_{B1} + F_{D}, \\
+&F_{ex}(x_1, \tau) = F_{B1} + F_{D}, \\
 
-&F_{B1} = -C_{13} \cdot x_0^3 \cdot \nabla p_A(\zeta, \tau), \\
+&F_{B1} = -C_{10} \cdot x_0^3 \cdot \nabla p_A(x_1, \tau), \\
 
-&F_{D} =-C_{14}\cdot x_0\left(C_{15}x_3 -u_{ac}(x_1, \tau) \right).
+&F_{D} =-C_{11}\cdot x_0\left(S_{3}x_3 -u_{ac}(x_1, \tau) \right).
 \end{align*}
 ```
 
@@ -350,13 +350,13 @@ where
 
 ```math
 \begin{align*}
-&p_A(x_1, \tau) = \sum_{i=0}^kC_{17+i} \cdot\cos(2\pi C_{10}C_{17+3k+i} x_1 + C_{17+2k+i})\cdot\sin(\omega_i \tau + C_{17+2k+i})\\
+&p_A(x_1, \tau) = \sum_{i=0}^kD_{i} \cdot\cos(2\pi S_{2}D_{3k+i} x_1 + D_{2k+i})\cdot\sin(2\pi S_{1}D_{k+i} \tau + D_{2k+i})\\
 
-&\dot{p}_A(x_1, \tau) = \sum_{i=0}^k \omega_i C_{17+i} \cdot \cos(2\pi C_{10}C_{17+3k+i}x_1 + C_{17+2k+i})\cdot \cos(\omega_it+C_{17+2k+i})\\
+&\dot{p}_A(x_1, \tau) = \sum_{i=0}^k D_{k+i} D_{i} \cdot \cos(2\pi S_{2}D_{3k+i}x_1 + D_{2k+i})\cdot \cos(2\pi S_{1}D_{k+i}\tau+D_{2k+i})\\
 
-&\nabla p_A(x_1, \tau) = -\sum_{i=0}^k k_iC_{17+i}\cdot\sin(2\pi C_{10}C_{17+3k+i}x_1+C_{17+2k+i}) \cdot\sin(\omega_i \tau + C_{17+2k+i})\\
+&\nabla p_A(x_1, \tau) = -\sum_{i=0}^k D_{3k+i}D_{i}\cdot\sin(2\pi S_{2}D_{3k+i}x_1+D_{2k+i}) \cdot\sin(2\pi S_{1}D_{k+i} \tau + D_{2k+i})\\
 
-&u_{ac}(x_1, \tau)=-C_{16}\sum_{i=0}^k C_{17+i}\cdot \sin(2\pi C_{10}C_{17+3k+i}x_1 + C_{17+2k+i}) \cdot \cos(\omega_i \tau + C_{17+2k+i})\\
+&u_{ac}(x_1, \tau)=-S_{4}\sum_{i=0}^k D_{i}\cdot \sin(2\pi S_{2}D_{3k+i}x_1+D_{2k+i}) \cdot \cos(2\pi S_{1}D_{k+i} \tau + D_{2k+i})\\
 \end{align*}
 ```
 
@@ -383,38 +383,37 @@ C_6&=\dfrac{1}{\rho_Lc_LR_0}\left(\dfrac{2\pi}{\omega_r}\right)^2 \\
 
 C_7&=\dfrac{R_0}{c_L}\dfrac{\omega_r}{2\pi} \\
 
-C_8&=3\gamma \\
-
-C_{9}&=1/\omega_r \\
-
 \\
 \textbf{Equation of motion:} \\
 \\
 
-C_{10}&=\dfrac{\lambda_r}{2\pi}=1/k_r \\
+C_{8}&=\left(\dfrac{\lambda_r}{2R_0}\right)^2 \\
 
-C_{11}&=\left(\dfrac{\lambda_r}{2R_0}\right)^2 \\
+C_{9}&=\dfrac{2\pi}{\rho_LR_0^3\lambda_r\omega_r^2} \\
 
-C_{12}&=\dfrac{2\pi}{\rho_LR_0^3\lambda_r\omega_r^2} \\
+C_{10}&=\dfrac{4}{3}\pi R_0^3 \\
 
-C_{13}&=\dfrac{4}{3}\pi R_0^3 \\
+C_{11}&=12 \pi \mu_L R_0 \\
 
-C_{14}&=12 \pi \mu_L R_0 \\
-
-C_{15}&=c_L \\
-
-C_{16}&=\dfrac{1}{\rho_L c_L} \\
+\\
+\textbf{Static constans}
+\\
+S_{0}&=3\gamma \\
+S_{1}&=1/\omega_r \\ 
+S_{2}&=\dfrac{\lambda_r}{2\pi}=1/k_r \\
+S_{3}&=c_L \\
+S_{4}&=\dfrac{1}{\rho_L c_L} \\
 
 \\
 \textbf{Acoustic Field:} \\
 \\
 
-C_{17+i}&=P_{A,i} \\
+D_{i}&=P_{A,i} \\
 
-C_{17+k+i}&=\omega_i \\
+D_{k+i}&=\omega_i \\
 
-C_{17+2k+i}&=\theta_i \\
+D_{2k+i}&=\theta_i \\
 
-C_{17+3k+i}&=\dfrac{2\pi f_i}{c_L}=\dfrac{2\pi}{\lambda_i}=k_i \\
+D_{3k+i}&=\dfrac{2\pi f_i}{c_L}=\dfrac{2\pi}{\lambda_i}=k_i \\
 \end{align*}
 ```

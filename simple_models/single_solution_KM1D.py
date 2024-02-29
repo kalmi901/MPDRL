@@ -21,8 +21,8 @@ P0  = 1.0*1e5   # Ambient Pressure [Pa]
 PE  = 1.4       # Polytrophic Exponent [-]
 
 # Try not to modify
-__AC_FUN_SIG = nb.float64(nb.float64, nb.float64, nb.float64[:])
-__ODE_FUN_SIG = nb.float64[:](nb.float64, nb.float64[:], nb.float64[:])
+__AC_FUN_SIG = nb.float64(nb.float64, nb.float64, nb.float64[:], nb.float64[:])
+__ODE_FUN_SIG = nb.float64[:](nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:])
 
 
 def setup(ac_field, k):
@@ -99,16 +99,17 @@ def setup(ac_field, k):
 
 
     elif ac_field == "SW_N":
-        """Standing Wave witht NODE located at x = 0"""
+        """Standing Wave with NODE located at x = 0"""
         
         @nb.njit(__AC_FUN_SIG, inline='always')
-        def _PA(t, x, cp):
+        def _PA(t, x, sp, dp):
             """
             Excitation Pressure (dual-frequency) \n
             Arguments: \n
                 t (nb.float64)      - Dimensionless time
                 x (nb.float64)      - Dimensionless position of the bubble
-                cp(nb.float64[:])   - Pre-computed constants
+                sp(nb.float64[:])   - Static constants
+                dp(nb.float64[:])   - Dynamic constants
 
             Returns: \n
                 p (nb.float64)      - Pressure amplitude
@@ -116,19 +117,20 @@ def setup(ac_field, k):
 
             p = 0.0
             for i in range(k):
-                p += cp[17 + i] * np.sin(2*np.pi*cp[10]*cp[17+3*k + i] * x + cp[17+2*k + i]) \
-                                * np.sin(2*np.pi* cp[9]*cp[17  +k + i] * t + cp[17+2*k + i])
+                p += dp[i]  * np.sin(2*np.pi*sp[2]*dp[3*k + i] * x + dp[2*k + i]) \
+                            * np.sin(2*np.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
 
             return p
 
         @nb.njit(__AC_FUN_SIG, inline='always')
-        def _PAT(t, x, cp):
+        def _PAT(t, x, sp, dp):
             """
             The time derivative of the excitation pressure \n
             Arguments: \n
                 t (nb.float64)      - Dimensionless time
                 x (nb.float64)      - Dimensionless postion of the bubble
-                cp(nb.float64[:])   - Pre-computed constants
+                sp(nb.float64[:])   - Static constants
+                dp(nb.float64[:])   - Dynamic constants
 
             Returns: \n
                 pt(nb.float64)       - time derivative of pressure amplitude
@@ -136,20 +138,21 @@ def setup(ac_field, k):
 
             pt = 0.0
             for i in range(k):
-                pt+= cp[17 + i] * cp[17+k + i] \
-                                * np.sin(2*np.pi*cp[10]*cp[17+3*k + i] * x + cp[17+2*k + i]) \
-                                * np.cos(2*np.pi* cp[9]*cp[17+  k + i] * t + cp[17+2*k + i])
+                pt+= dp[i] * dp[k + i] \
+                           * np.sin(2*np.pi*sp[2]*dp[3*k + i] * x + dp[2*k + i]) \
+                           * np.cos(2*np.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
 
             return pt
 
         @nb.njit(__AC_FUN_SIG, inline='always')
-        def _GRADP(t, x, cp):
+        def _GRADP(t, x, sp, dp):
             """
             The gradient of the pressure field \n
             Argumens: \n
                 t (nb.float64)      - Dimensionless time
                 x (nb.float64)      - Dimensionless bubble position
-                cp(nb.float64[:])   - Pre-computed constants
+                sp(nb.float64[:])   - Static constants
+                dp(nb.float64[:])   - Dynamic constants
 
             Returns: \n
                 p (nb.float64)      - Gradient of the pressure field (dp/dx)
@@ -157,20 +160,21 @@ def setup(ac_field, k):
 
             px = 0.0
             for i in range(k):
-                px+= cp[17 + i] * cp[17 +3*k + i] \
-                                * np.cos(2*np.pi*cp[10]*cp[17+3*k + i] * x + cp[17+2*k + i]) \
-                                * np.sin(2*np.pi* cp[9]*cp[17+  k + i] * t + cp[17+2*k + i]) 
+                px+= dp[i] * dp[3*k + i] \
+                           * np.cos(2*np.pi*sp[2]*dp[3*k + i] * x + dp[2*k + i]) \
+                           * np.sin(2*np.pi*sp[1]*dp[  k + i] * t + dp[2*k + i]) 
             
             return px
 
         @nb.njit(__AC_FUN_SIG, inline='always')
-        def _UAC(t, x, cp):
+        def _UAC(t, x, sp, dp):
             """
             The particle velocity induced by the acoustic irradiation
             Arguments: \n
                 t (nb.float64)      - Dimensionless time
                 x (nb.float64)      - Dimnesionless bubble position
-                cp(nb.float64[:])   - Pre-computed constants
+                sp(nb.float64[:])   - Static constants
+                dp(nb.gloat64[:])   - Dynamic constants
 
             Returns: \n
                 ux (nb.float64)      - Particle velocity ux
@@ -178,9 +182,9 @@ def setup(ac_field, k):
 
             ux = 0.0
             for i in range(k):
-                ux+=-cp[17 + i] * cp[16] \
-                                * np.cos(2*np.pi*cp[10]*cp[17+3*k +i] * x + cp[17+2*k + i]) \
-                                * np.cos(2*np.pi* cp[9]*cp[17+  k +i] * t + cp[17+2*k + i])
+                ux+=-dp[i] * sp[4] \
+                           * np.cos(2*np.pi*sp[2]*dp[3*k +i] * x + dp[2*k + i]) \
+                           * np.cos(2*np.pi*sp[1]*dp[  k +i] * t + dp[2*k + i])
 
             return ux
             
@@ -193,15 +197,17 @@ def setup(ac_field, k):
     # ------------ ODE Function --------------
 
     @nb.njit(__ODE_FUN_SIG)
-    def _ode_function(t, x, cp):
+    def _ode_function(t, x, cp, sp, dp):
         """
         Dimensioness Keller--Miksis equation and 1 dimensional translational motion \n
-        for detals see the model description of KM1D \n
-        ________ \n
+        for details see the model description of KM1D \n
+        _________ \n
         Arguments: \n
             t (nb.float64)          - Dimensionless time
             x (nb.float64[:])       - State variables (dimless R, z, U, w)
             cp(nb.float64[:])       - Pre-computed constants
+            sp(nb.float64[:])       - Static constants
+            dp(nb.float64[:])       - Dynamic constants
 
         Returns: \n
             dx(nb.float64[:])       - dx/dt = f(x, t)
@@ -223,24 +229,24 @@ def setup(ac_field, k):
 
         dx = np.zeros_like(x)
         rx0 = 1.0 / x[0]
-        p = rx0**cp[8]
+        p = rx0**sp[0]
 
         N = (cp[0] + cp[1]*x[2]) * p \
                 - cp[2] * (1 + cp[7]*x[2]) - cp[3]* rx0 - cp[4]*x[2]*rx0 \
                 - 1.5 * (1.0 - cp[7]*x[2] * (1.0/3.0))*x[2]*x[2] \
-                - (1 + cp[7]*x[2]) * cp[5] * _PA(t, x[1], cp) - cp[6] * _PAT(t, x[1], cp) * x[0] \
-                + cp[11] * x[3]*x[3]                                    # Feedback term
+                - (1 + cp[7]*x[2]) * cp[5] * _PA(t, x[1], sp, dp) - cp[6] * _PAT(t, x[1], sp, dp) * x[0] \
+                + cp[8] * x[3]*x[3]                                    # Feedback term
 
         D = x[0] - cp[7]*x[0]*x[2] + cp[4]*cp[7]
         rD = 1.0 / D
 
-        Fb1 = - cp[13]*x[0]*x[0]*x[0] * _GRADP(t, x[1], cp)            # Primary Bjerknes Force
-        Fd  = - cp[14]*x[0] * (x[3]*cp[15] - _UAC(t, x[1], cp) )       # Drag Force
+        Fb1 = - cp[10]*x[0]*x[0]*x[0] * _GRADP(t, x[1], sp, dp)           # Primary Bjerknes Force
+        Fd  = - cp[11]*x[0] * (x[3]*sp[3] - _UAC(t, x[1], sp, dp) )       # Drag Force
 
         dx[0] = x[2]
         dx[1] = x[3]
         dx[2] = N * rD
-        dx[3] = 3*(Fb1+Fd)*cp[12]*rx0*rx0*rx0 - 3.0*x[2]*rx0*x[3]
+        dx[3] = 3*(Fb1+Fd)*cp[9]*rx0*rx0*rx0 - 3.0*x[2]*rx0*x[3]
 
         return dx
 
@@ -252,7 +258,7 @@ class SingleBubble:
                  FREQ: List[float],
                  PA: List[float],
                  PS: List[float] = [0.0, 0.0],
-                 REL_FREQ: Optional[float] = None,
+                 REF_FREQ: Optional[float] = None,
                  k: int = 1,
                  AC_FIELD: str = "CONST") -> None:
         """
@@ -275,7 +281,7 @@ class SingleBubble:
         self._FREQ = np.array(FREQ, dtype=np.float64) *  1e3
         self._PA = np.array(PA, dtype=np.float64) * 1e5
         self._PS = np.array(PS, dtype=np.float64)
-        self._REF_FREQ = REL_FREQ*1e3 if REL_FREQ is not None else FREQ[0]*1e3
+        self._REF_FREQ = REF_FREQ*1e3 if REF_FREQ is not None else FREQ[0]*1e3
         self._k = k
 
         # Initial Conditions
@@ -287,7 +293,9 @@ class SingleBubble:
         # Timedomain
         self.t0 = 0.0   
         self.T = 100.0      # Number of Periods
-        self.cp = np.zeros((18+4*k, ), dtype=np.float64)
+        self.cp = np.zeros((12, ), dtype=np.float64)
+        self.sp = np.zeros(( 5, ), dtype=np.float64)
+        self.dp = np.zeros((4*k,), dtype=np.float64)
         self._update_control_parameters()
 
 
@@ -302,15 +310,16 @@ class SingleBubble:
         Returns: \
             t (np.float64[:])   - dimensionless time
             r (np.float64[:])   - dimensionless bubble radius
+            u (np.float64[:])   - dimensionless bubble wall velocity
             x (np.float64[:])   - dimensionless bubble position
-            u (np.float64[:])   - dimensionless translational velocity
+            v (np.float64[:])   - dimensionless translational velocity
         """
         
         # TODO: **options are not used
         res = solve_ivp(fun=_ode_function,
                         t_span=[self.t0, self.T],
                         y0=[self.r0, self.x0, self.u0, self.v0],
-                        args=(self.cp, ),
+                        args=(self.cp, self.sp, self.dp),
                         method='LSODA',
                         atol=atol,
                         rtol=rtol,
@@ -337,24 +346,27 @@ class SingleBubble:
         self.cp[5] = ((2.0 * np.pi / self._R0 / wr)**2.0) / RHO
         self.cp[6] = ((2.0 * np.pi / wr)** 2.0) / CL / RHO / self._R0
         self.cp[7] = self._R0 * wr / (2 * np.pi) / CL
-        self.cp[8] = 3.0 * PE
-        self.cp[9] = 1.0 / wr
 
         # Translational-Motion Constansts
-        self.cp[10] = lr / (2 * np.pi)                                          # reciprocal of reference Wave number
-        self.cp[11] = (0.5 * lr / self._R0)**2
-        self.cp[12] = (2.0 * np.pi) / RHO / self._R0 / lr / (wr * self._R0)**2.0
-        self.cp[13] = 4 * np.pi / 3 * self._R0**3
-        self.cp[14] = 12 * np.pi * VIS * self._R0
-        self.cp[15] = CL
-        self.cp[16] = 1 / RHO / CL
+        self.cp[8]  = (0.5 * lr / self._R0)**2
+        self.cp[9]  = (2.0 * np.pi) / RHO / self._R0 / lr / (wr * self._R0)**2.0
+        self.cp[10] = 4 * np.pi / 3 * self._R0**3
+        self.cp[11] = 12 * np.pi * VIS * self._R0
+
+        # Static Constants
+        self.sp[0] = 3.0 * PE
+        self.sp[1] = 1.0 / wr
+        self.sp[2] = lr / (2 * np.pi) 
+        self.sp[3] = CL
+        self.sp[4] = 1 / RHO / CL
+
 
         # Excitation Parameters
         for i in range(self._k):
-            self.cp[17            + i] = self._PA[i]                            # Pressure Amplitude
-            self.cp[17 +  self._k + i] = 2.0 * np.pi * self._FREQ[i]            # Angular Frequency
-            self.cp[17 +2*self._k + i] = self._PS[i]                            # Phase Shift
-            self.cp[17 +3*self._k + i] = 2.0 * np.pi * self._FREQ[i] / CL       # Wave number
+            self.dp[          + i] = self._PA[i]                            # Pressure Amplitude
+            self.dp[  self._k + i] = 2.0 * np.pi * self._FREQ[i]            # Angular Frequency
+            self.dp[2*self._k + i] = self._PS[i]                            # Phase Shift
+            self.dp[3*self._k + i] = 2.0 * np.pi * self._FREQ[i] / CL       # Wave number
 
 
 

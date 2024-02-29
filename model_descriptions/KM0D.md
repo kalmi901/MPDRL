@@ -213,7 +213,8 @@ respectively.
 
 ## First-order system
 
-The above derived dimensionless Keller--Miksis equation is rewritten into a first-order system and a set of pre-computed constants $`C_k`$ are introduced as in the paper [2]. The state vector is $`\mathbf{x}^T=[y, y']`$; thus, the first-order system is
+The above derived dimensionless Keller--Miksis equation is rewritten into a first-order system and a set of pre-computed constants $`C_k`$ are introduced as in the paper [2]. $`S_k`$ and $`D_k`$ denote separate set of constants. $`S`$ can be stored in shared GPU memory (static and do not depend on bubble size) and $`D_k`$ is referred to dynamic that will be adjusted.
+The state vector is $`\mathbf{x}^T=[y, y']`$; thus, the first-order system is
 
 ```math
 \begin{align*}
@@ -225,7 +226,7 @@ where
 
 ```math
 \begin{split}
-\tilde{N}_{KM}=\left(C_{0}+C_{1} x_1 \right)\left(\dfrac{1}{x_0}\right)^{C_8} - C_2 \left(1 +C_7 x_1\right) -C_3 \dfrac{1}{y_0}-C_4\dfrac{x_1}{y_0} \\
+\tilde{N}_{KM}=\left(C_{0}+C_{1} x_1 \right)\left(\dfrac{1}{x_0}\right)^{S_0} - C_2 \left(1 +C_7 x_1\right) -C_3 \dfrac{1}{y_0}-C_4\dfrac{x_1}{y_0} \\
 -\left(1 - \dfrac{C_7}{3}\right)\dfrac{3}{2}x_1^2 - (1 + C_7x_1)C_5p_A(\tau)-C_6\dot{p}_A(\tau)x_0
 \end{split}
 ```
@@ -239,11 +240,11 @@ and
 The pressure excitation and its time derivative are
 
 ```math
-p_{A}(\tau) =\sum\limits_{i=0}^k \cdot \sin\left(2\pi C_{9}C_{10+k+i} \tau + C_{10+2k+i} \right)
+p_{A}(\tau) =\sum\limits_{i=0}^k \cdot \sin\left(2\pi S_{1}D_{k+i} \tau + D_{2k+i} \right)
 ``` 
 
 ```math
-\dot{p}_{A}(\tau) = \sum\limits_{i=0}^k C_{10+i} C_{10+k+i} \cdot \cos\left(2\pi C_{9}C_{10+k+i} \tau + C_{10+2k+i} \right),
+\dot{p}_{A}(\tau) = \sum\limits_{i=0}^k D_{i} D_{k+i} \cdot \cos\left(2\pi S_{1}D_{k+i} \tau + D_{2k+i} \right),
 ``` 
 
 respectively. Note that $`k`$ is the number of harmonic components.
@@ -272,19 +273,19 @@ C_6&=\dfrac{1}{\rho_Lc_LR_0}\left(\dfrac{2\pi}{\omega_r}\right)^2 \\
 
 C_7&=\dfrac{R_0}{c_L}\dfrac{\omega_r}{2\pi} \\
 
-C_8&=3\gamma \\
+S_0&=3\gamma \\
 
-C_{9}&=1/\omega_r \\
+S_{1}&=1/\omega_r \\
 
 \\
 
 \textbf{Acoustic Field:} \\
 \\
-C_{10+i}&=P_{Ai} \\
+D_{i}&=P_{Ai} \\
 
-C_{10+k+i}&=\omega_i \\
+D_{k+i}&=\omega_i \\
 
-C_{10+2k+i}&=\theta_i
+D_{2k+i}&=\theta_i
 
 \end{align*}
 ```

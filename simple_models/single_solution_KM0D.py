@@ -24,8 +24,8 @@ PE  = 1.4       # Polytrophic Exponent [-]
 
 
 # Try not to modify
-__AC_FUN_SIG = nb.float64(nb.float64, nb.float64[:])
-__ODE_FUN_SIG = nb.float64[:](nb.float64, nb.float64[:], nb.float64[:])
+__AC_FUN_SIG = nb.float64(nb.float64, nb.float64[:], nb.float64[:])
+__ODE_FUN_SIG = nb.float64[:](nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:])
 
 def setup(k):
 
@@ -34,12 +34,13 @@ def setup(k):
     # ----------------- Acoustic Field -------------------
 
     @nb.njit(__AC_FUN_SIG, inline="always")
-    def _PA(t, cp):
+    def _PA(t, sp, dp):
         """
         Excitation Pressure (dual-frequency) \n
         Arguments: \n
             t (nb.float64)      - Dimensionless time
-            cp(nb.float64[:])   - Pre-computed constants
+            sp(nb.float64[:])   - Static constants
+            dp(nb.float64[:])   - Dynamic constant
 
         Returns: \n
             p (nb.float64)      - Pressure amplitude
@@ -47,17 +48,18 @@ def setup(k):
 
         p = 0.0
         for i in range(k):
-            p += cp[10 + i] * np.sin(2*np.pi*cp[9]*cp[10 +  k + i] * t + cp[10+2*k + i])
+            p += dp[i] * np.sin(2*np.pi*sp[1]*dp[k + i] * t + dp[2*k + i])
 
         return p
 
     @nb.njit(__AC_FUN_SIG, inline='always')
-    def _PAT(t, cp):
+    def _PAT(t, sp, dp):
         """
         The time derivative of the excitation pressure \n
         Arguments: \n
             t (nb.float64)      - Dimensionless time
-            cp(nb.float64[:])   - Pre-computed constants
+            sp(nb.float64[:])   - Static constants
+            dp(nb.float64[:])   - Dynamic constants
 
         Returns: \n
             pt(nb.float64)       - time derivative of pressure amplitude
@@ -65,8 +67,8 @@ def setup(k):
 
         pt = 0.0
         for i in range(k):
-            pt += cp[10 + i] * cp[10 +  k + i] \
-                * np.cos(2*np.pi*cp[9]*cp[10 +  k + i] * t + cp[10+2*k + i])
+            pt += dp[i] * dp[k + i] \
+                * np.cos(2*np.pi*sp[1]*dp[k + i] * t + dp[2*k + i])
 
         return  pt
 
@@ -74,7 +76,7 @@ def setup(k):
     # ---------------------- ODE System  -----------------------
 
     @nb.njit(__ODE_FUN_SIG)
-    def _ode_function(t, x, cp):
+    def _ode_function(t, x, cp, sp, dp):
         """
         Dimensionless Keller--Miksis Equation \n
         ___ \n
@@ -82,6 +84,8 @@ def setup(k):
             t (nb.float64)      -   Dimensionless time
             x (nb.float64)      -   State variables (dimless R, U)
             cp (nb.float64[:])  -   Pre-computed constants
+            sp (nb.float64[:])  -   Static bubble size independent consntants
+            dp (nb.float64[:])  -   Dynamic constants
 
         Returns: \n
             dx (nb.float64[:])  dx/dt = f(x, t)
@@ -99,12 +103,12 @@ def setup(k):
 
         dx = np.zeros_like(x)
         rx0 = 1.0 / x[0]
-        p = rx0**cp[8]
+        p = rx0**sp[0]
 
         N = (cp[0] + cp[1]*x[1]) * p \
             - cp[2] * (1 + cp[7]*x[1]) - cp[3]* rx0 - cp[4]*x[1]*rx0 \
             - 1.5 * (1.0 - cp[7]*x[1] * (1.0/3.0))*x[1]*x[1] \
-            - (1 + cp[7]*x[1]) * cp[5] * _PA(t, cp) - cp[6] * _PAT(t, cp) * x[0]
+            - (1 + cp[7]*x[1]) * cp[5] * _PA(t, sp, dp) - cp[6] * _PAT(t, sp, dp) * x[0]
 
         D = x[0] - cp[7]*x[0]*x[1] + cp[4]*cp[7]
         rD = 1.0 / D
@@ -126,7 +130,7 @@ class SingleBubble:
                  FREQ: List[float],
                  PA: List[float],
                  PS: List[float] = [0.0, 0.0],
-                 REL_FREQ: Optional[float] = None,
+                 REF_FREQ: Optional[float] = None,
                  k: int = 1) -> None:
         
         """
@@ -135,7 +139,7 @@ class SingleBubble:
             FREQ     - excitation frequecy [f0, f1] (kHz)
             PA       - pressure amplitude [PA0, PA1] (bar)
             PS       - phase shift [PS0, PS1] (radians)
-            REL_FREQ - relative frequency (optional, default FREQ[0]) (kHz)
+            REF_FREQ - relative frequency (optional, default FREQ[0]) (kHz)
             k        - number of harmonic components (int)
         """
         
@@ -145,7 +149,7 @@ class SingleBubble:
         self._FREQ = np.array(FREQ, dtype=np.float64) * 1e3
         self._PA = np.array(PA, dtype=np.float64) * 1e5
         self._PS = np.array(PS, dtype=np.float64)
-        self._REF_FREQ = REL_FREQ *1e3 if REL_FREQ is not None else FREQ[0]*1e3
+        self._REF_FREQ = REF_FREQ *1e3 if REF_FREQ is not None else FREQ[0]*1e3
         self._k = k
 
 
@@ -157,7 +161,9 @@ class SingleBubble:
         self.t0 = 0.0
         self.T  = 100.0     # Number Of Periods
 
-        self.cp = np.zeros((10+3*k, ), dtype=np.float64)
+        self.cp = np.zeros((8, ), dtype=np.float64)
+        self.sp = np.zeros((2, ), dtype=np.float64)
+        self.dp = np.zeros((3*k, ), dtype=np.float64 )
         self._update_control_parameters()
 
 
@@ -172,7 +178,7 @@ class SingleBubble:
         res = solve_ivp(fun=_ode_function,
                         t_span=[self.t0, self.T],
                         y0=[self.r0, self.u0],
-                        args=(self.cp, ),
+                        args=(self.cp, self.sp, self.dp),
                         method='LSODA',
                         atol=atol,
                         rtol=rtol,
@@ -199,14 +205,16 @@ class SingleBubble:
         self.cp[5] = ((2.0 * np.pi / self._R0 / wr)**2.0) / RHO
         self.cp[6] = ((2.0 * np.pi / wr)** 2.0) / CL / RHO / self._R0
         self.cp[7] = self._R0 * wr / (2 * np.pi) / CL
-        self.cp[8] = 3.0 * PE
-        self.cp[9] = 1.0 / wr
 
-        # Excitation Parameters
+        # Static Constants
+        self.sp[0] = 3.0 * PE
+        self.sp[1] = 1.0 / wr
+
+        # Dynamic Constants
         for i in range(self._k):
-            self.cp[10            + i] = self._PA[i]                        # Pressure Amplitude
-            self.cp[10 +  self._k + i] = 2.0 * np.pi * self._FREQ[i]        # Angular Frequency
-            self.cp[10 +2*self._k + i] = self._PS[i]                        # Phase Shift
+            self.dp[          + i] = self._PA[i]                        # Pressure Amplitude
+            self.dp[  self._k + i] = 2.0 * np.pi * self._FREQ[i]        # Angular Frequency
+            self.dp[2*self._k + i] = self._PS[i]                        # Phase Shift
 
 
 if __name__ == "__main__":
