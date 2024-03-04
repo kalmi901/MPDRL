@@ -82,39 +82,39 @@ def fill_solver_object(solver: SolverObject,
             R0 = RE * 1e-6              # Equilbrium radius (m)
             Pinf = P0 * 1e5             # Ambinet Pressures (Pa)
 
-            solver.set_host(problem_number, "control_parameter", 0, (2.0 * ST / R0 + Pinf - PV) * (2.0* np.pi / R0 / wr)**2.0 / RHO)
-            solver.set_host(problem_number, "control_parameter", 1, (1.0 - 3.0*PE) * (2 * ST / R0 + Pinf - PV) * (2.0*np.pi / R0 / wr) / CL / RHO)
-            solver.set_host(problem_number, "control_parameter", 2, (Pinf - PV) * (2.0 *np.pi / R0 / wr)**2.0 / RHO)
-            solver.set_host(problem_number, "control_parameter", 3, (2.0 * ST / R0 / RHO) * (2.0 * np.pi / R0 / wr)**2.0)
-            solver.set_host(problem_number, "control_parameter", 4, 4.0 * VIS / RHO / (R0**2.0) * (2.0* np.pi / wr))
-            solver.set_host(problem_number, "control_parameter", 5, ((2.0 * np.pi / R0 / wr)**2.0) / RHO)
-            solver.set_host(problem_number, "control_parameter", 6, ((2.0 * np.pi / wr)** 2.0) / CL / RHO / R0)
-            solver.set_host(problem_number, "control_parameter", 7, R0 * wr / (2 * np.pi) / CL)
-            solver.set_host(problem_number, "control_parameter", 8, 3.0 * PE)
+            solver.set_host(problem_number, "control_parameters", 0, (2.0 * ST / R0 + Pinf - PV) * (2.0* np.pi / R0 / wr)**2.0 / RHO)
+            solver.set_host(problem_number, "control_parameters", 1, (1.0 - 3.0*PE) * (2 * ST / R0 + Pinf - PV) * (2.0*np.pi / R0 / wr) / CL / RHO)
+            solver.set_host(problem_number, "control_parameters", 2, (Pinf - PV) * (2.0 *np.pi / R0 / wr)**2.0 / RHO)
+            solver.set_host(problem_number, "control_parameters", 3, (2.0 * ST / R0 / RHO) * (2.0 * np.pi / R0 / wr)**2.0)
+            solver.set_host(problem_number, "control_parameters", 4, 4.0 * VIS / RHO / (R0**2.0) * (2.0* np.pi / wr))
+            solver.set_host(problem_number, "control_parameters", 5, ((2.0 * np.pi / R0 / wr)**2.0) / RHO)
+            solver.set_host(problem_number, "control_parameters", 6, ((2.0 * np.pi / wr)** 2.0) / CL / RHO / R0)
+            solver.set_host(problem_number, "control_parameters", 7, R0 * wr / (2 * np.pi) / CL)
+            solver.set_host(problem_number, "control_parameters", 8, 3.0 * PE)
 
             # Physical Parameters
-            solver.set_host(problem_number, "control_parameter",  9, p0 * 1e5)
-            solver.set_host(problem_number, "control_parameter", 10, p1 * 1e5)
-            solver.set_host(problem_number, "control_parameter", 11, w1)
-            solver.set_host(problem_number, "control_parameter", 12, w2)
-            solver.set_host(problem_number, "control_parameter", 13, 0)                     # Phase shift
-            solver.set_host(problem_number, "control_parameter", 14, R0)
+            solver.set_host(problem_number, "control_parameters",  9, p0 * 1e5)
+            solver.set_host(problem_number, "control_parameters", 10, p1 * 1e5)
+            solver.set_host(problem_number, "control_parameters", 11, w1)
+            solver.set_host(problem_number, "control_parameters", 12, w2)
+            solver.set_host(problem_number, "control_parameters", 13, 0)                     # Phase shift
+            solver.set_host(problem_number, "control_parameters", 14, R0)
 
             # Parameters for translation
-            solver.set_host(problem_number, "control_parameter", 15, (lr / R0)**2)
-            solver.set_host(problem_number, "control_parameter", 16, (2.0 * np.pi) / RHO / R0 / lr / (wr * R0)**2.0)
-            solver.set_host(problem_number, "control_parameter", 17, 4 * np.pi / 3.0 * R0**3.0)
-            solver.set_host(problem_number, "control_parameter", 18, 12 * np.pi * VIS * R0)
+            solver.set_host(problem_number, "control_parameters", 15, (lr / R0)**2)
+            solver.set_host(problem_number, "control_parameters", 16, (2.0 * np.pi) / RHO / R0 / lr / (wr * R0)**2.0)
+            solver.set_host(problem_number, "control_parameters", 17, 4 * np.pi / 3.0 * R0**3.0)
+            solver.set_host(problem_number, "control_parameters", 18, 12 * np.pi * VIS * R0)
 
             # Acoustic field properties
-            solver.set_host(problem_number, "control_parameter", 19, 2 * np.pi / l1)        # k1 wavenumber
-            solver.set_host(problem_number, "control_parameter", 20, 2 * np.pi / l2)        # k2 wavenumber
-            solver.set_host(problem_number, "control_parameter", 21, 1.0 / l1)              # wavelength
-            solver.set_host(problem_number, "control_parameter", 22, 1.0 / l2)              # wavelength
-            solver.set_host(problem_number, "control_parameter", 23, 1.0 / RHO / CL)        # Ac. Impedance 
-            solver.set_host(problem_number, "control_parameter", 24, CL)                    # Reference velocity
-            solver.set_host(problem_number, "control_parameter", 25, 1.0 / wr)              # Reference frequency
-            solver.set_host(problem_number, "control_parameter", 26, lr)                    # Reference length
+            solver.set_host(problem_number, "control_parameters", 19, 2 * np.pi / l1)        # k1 wavenumber
+            solver.set_host(problem_number, "control_parameters", 20, 2 * np.pi / l2)        # k2 wavenumber
+            solver.set_host(problem_number, "control_parameters", 21, 1.0 / l1)              # wavelength
+            solver.set_host(problem_number, "control_parameters", 22, 1.0 / l2)              # wavelength
+            solver.set_host(problem_number, "control_parameters", 23, 1.0 / RHO / CL)        # Ac. Impedance 
+            solver.set_host(problem_number, "control_parameters", 24, CL)                    # Reference velocity
+            solver.set_host(problem_number, "control_parameters", 25, 1.0 / wr)              # Reference frequency
+            solver.set_host(problem_number, "control_parameters", 26, lr)                    # Reference length
 
             problem_number += 1
 

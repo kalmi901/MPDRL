@@ -45,6 +45,7 @@ class SolverObject():
                 number_of_threads : int,
                 system_dimension  : int,
                 number_of_control_parameters : int,
+                number_of_shared_parameters: int = 0,
                 number_of_accessories : int = 1,
                 number_of_events: int = 0,
                 threads_per_block : int = 64,
@@ -65,6 +66,7 @@ class SolverObject():
         self._system_dimension = system_dimension
         self._number_of_threads = number_of_threads
         self._number_of_control_parameters = number_of_control_parameters
+        self._number_of_shared_parameters = number_of_shared_parameters
         self._number_of_accessories = number_of_accessories
         self._number_of_events = number_of_events
         self._threads_per_block = threads_per_block
@@ -124,8 +126,9 @@ class SolverObject():
         self._size_of_time_domain  = number_of_threads * 2
         self._size_of_actual_time  = number_of_threads
         self._size_of_actual_state = system_dimension * number_of_threads
-        self._size_of_accessories  = number_of_accessories * number_of_threads
+        self._size_of_accessories  = max(number_of_accessories * number_of_threads, 1)
         self._size_of_control_parameters = number_of_control_parameters * number_of_threads
+        self._size_of_shared_parameters = max(self._number_of_shared_parameters, 1)
         # TODO: Add more if necessary
 
         # ---- Host side (private) arrays -----
@@ -133,19 +136,22 @@ class SolverObject():
         self._h_actual_time  = cuda.pinned_array((self._size_of_actual_time, ), dtype=np.float64)
         self._h_actual_state = cuda.pinned_array((self._size_of_actual_state, ), dtype=np.float64)
         self._h_accessories  = cuda.pinned_array((self._size_of_accessories, ), dtype=np.float64)
-        self._h_control_parameter = cuda.pinned_array((self._size_of_control_parameters, ), np.float64)
+        self._h_control_parameters = cuda.pinned_array((self._size_of_control_parameters, ), np.float64)
+        self._h_shared_parameters = cuda.pinned_array((self._size_of_shared_parameters, ), np.float64)
 
         # ---- Device side (private) arrays -----
         self._d_time_domain  = cuda.device_array_like(self._h_time_domain)
         self._d_actual_time  = cuda.device_array_like(self._h_actual_time)
         self._d_actual_state = cuda.device_array_like(self._h_actual_state)
         self._d_accessories  = cuda.device_array_like(self._h_accessories)
-        self._d_control_parameter = cuda.device_array_like(self._h_control_parameter)
+        self._d_control_parameters = cuda.device_array_like(self._h_control_parameters)
+        self._d_shared_parameters = cuda.device_array_like(self._h_shared_parameters)
 
         # ---- Create / Compile the Kenel function -----
-        self._myfckin_kernel = _RKCK45_kernel(  self._number_of_threads,
+        self._njit_cuda_kernel = _RKCK45_kernel(self._number_of_threads,
                                                 self._system_dimension,
                                                 self._number_of_control_parameters,
+                                                self._number_of_shared_parameters,
                                                 self._number_of_accessories,
                                                 self._number_of_events,
                                                 self._method,
@@ -157,10 +163,11 @@ class SolverObject():
 
     # ---- Interface to call the GPU Kernel function ------
     def solve_my_ivp(self) :
-        self._myfckin_kernel[self._blocks_per_grid, self._threads_per_block](
+        self._njit_cuda_kernel[self._blocks_per_grid, self._threads_per_block](
                                 self._number_of_threads,
                                 self._d_actual_state,
-                                self._d_control_parameter,
+                                self._d_control_parameters,
+                                self._d_shared_parameters,
                                 self._d_accessories,
                                 self._d_time_domain,
                                 self._d_actual_time,
@@ -182,12 +189,12 @@ class SolverObject():
             self._h_time_domain[idx] = np.float64(value)
         elif property == "actual_state":
             self._h_actual_state[idx] = np.float64(value)
-        elif property == "control_parameter":
-            self._h_control_parameter[idx] = np.float64(value)
+        elif property == "control_parameters":
+            self._h_control_parameters[idx] = np.float64(value)
         elif property == "accessories":
             self._h_accessories[idx] = np.float64(value)
         else:
-            print("Nemfasza: SetHost")
+            print("Error: SetHost")
 
     def get_host(self, thread_id: int, property: str, index: int):
 
@@ -197,49 +204,55 @@ class SolverObject():
             return self._h_time_domain[idx]
         elif property == "actual_state":
             return self._h_actual_state[idx]
-        elif property == "control_parameter":
-            return self._h_control_parameter[idx]
+        elif property == "control_parameters":
+            return self._h_control_parameters[idx]
         elif property == "accessories":
             return self._h_accessories[idx]
         else:
-            print("Nemfasza: GetHost")
+            print("Error: GetHost")
             return None
 
     def syncronize_h2d(self, property:str):
         if property == "time_domain":
             self._d_time_domain.copy_to_device(self._h_time_domain)
-        elif property == "control_parameter":
-            self._d_control_parameter.copy_to_device(self._h_control_parameter)
+        elif property == "control_parameters":
+            self._d_control_parameters.copy_to_device(self._h_control_parameters)
+        elif property == "shared_parameters":
+            self._d_shared_parameters.copy_to_device(self._h_shared_parameters)
         elif property == "actual_state":
             self._d_actual_state.copy_to_device(self._h_actual_state)
         elif property == "accessories":
             self._d_accessories.copy_to_device(self._h_accessories)
         elif property == "all":
             self._d_time_domain.copy_to_device(self._h_time_domain)
-            self._d_control_parameter.copy_to_device(self._h_control_parameter)
+            self._d_control_parameters.copy_to_device(self._h_control_parameters)
+            self._d_shared_parameters.copy_to_device(self._h_shared_parameters)
             self._d_actual_state.copy_to_device(self._h_actual_state)
             self._d_accessories.copy_to_device(self._h_accessories)
         else:
-            print("Nemfasza...")
+            print("Error...")
 
         cuda.synchronize()
 
     def syncronize_d2h(self, property:str):
         if property == "time_domain":
             self._d_time_domain.copy_to_host(self._h_time_domain)
-        elif property == "control_parameter":
-            self._d_control_parameter.copy_to_host(self._h_control_parameter)
+        elif property == "control_parameters":
+            self._d_control_parameters.copy_to_host(self._h_control_parameters)
+        elif property == "shared_parameters":
+            self._d_shared_parameters.copy_to_host(self._h_shared_parameters)
         elif property == "actual_state":
             self._d_actual_state.copy_to_host(self._h_actual_state)
         elif property == "accessories":
             self._d_accessories.copy_to_host(self._h_accessories)
         elif property == "all":
             self._d_time_domain.copy_to_host(self._h_time_domain)
-            self._d_control_parameter.copy_to_host(self._h_control_parameter)
+            self._d_control_parameters.copy_to_host(self._h_control_parameters)
+            self._d_shared_parameters.copy_to_host(self._h_shared_parameters)
             self._d_actual_state.copy_to_host(self._h_actual_state)
             self._d_accessories.copy_to_host(self._h_accessories)
         else:
-            print("Nemfasza...")
+            print("Error...")
 
         cuda.synchronize()
 
@@ -250,6 +263,7 @@ class SolverObject():
 def _RKCK45_kernel( number_of_threads: int,
                     system_dimension: int,
                     number_of_control_parameters: int,
+                    number_of_shared_parameters: int,
                     number_of_accessories: int,
                     number_of_events: int,
                     method : str,
@@ -263,6 +277,7 @@ def _RKCK45_kernel( number_of_threads: int,
     NT  = number_of_threads
     SD  = system_dimension
     NCP = number_of_control_parameters
+    NSP = number_of_shared_parameters
     NA  = number_of_accessories
     NE  = number_of_events
     ALGO = method 
@@ -271,7 +286,6 @@ def _RKCK45_kernel( number_of_threads: int,
     ETOL = event_tol
     EDIR = event_dir
 
-    print(NE)
     # DEVICE FUNCTIONS CALLED IN THE KERNEL
     # -------------------------------------
 
@@ -317,7 +331,7 @@ def _RKCK45_kernel( number_of_threads: int,
             print("State is not finite")
             l_is_finite = False
 
-        # TODO: !!!!
+
         if l_is_finite == False:
             time_step_multiplicator = time_step_shrink_limit
             l_update_step = False
@@ -391,6 +405,7 @@ def _RKCK45_kernel( number_of_threads: int,
                 nb.float64[:],
                 nb.float64[:],
                 nb.float64[:],
+                nb.float64[:],
                 nb.float64,
                 nb.float64
     ), device=True, inline=True)
@@ -399,6 +414,7 @@ def _RKCK45_kernel( number_of_threads: int,
                             l_actual_state,
                             l_error,
                             l_control_parameter,
+                            s_shared_parameter,
                             l_accessories,
                             l_actual_time,
                             l_time_step):
@@ -415,7 +431,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                 l_next_state,
                                 l_actual_state,
                                 l_accessories,
-                                l_control_parameter)
+                                l_control_parameter,
+                                s_shared_parameter)
         
         # K2 ----------------------------
         t = l_actual_time + dTp2
@@ -428,7 +445,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                 k1,
                                 x, 
                                 l_accessories,
-                                l_control_parameter)
+                                l_control_parameter,
+                                s_shared_parameter)
         
         # K3 ----------------------------
         for i in nb.prange(SD):
@@ -440,7 +458,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                 k1,
                                 x,
                                 l_accessories,
-                                l_control_parameter)
+                                l_control_parameter,
+                                s_shared_parameter)
 
         # K4 -------------------------------
         t = l_actual_time + l_time_step
@@ -454,7 +473,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                 k1,
                                 x,
                                 l_accessories,
-                                l_control_parameter)
+                                l_control_parameter,
+                                s_shared_parameter)
 
         # NEW STATE -------------------------
         for i in nb.prange(SD):
@@ -472,6 +492,7 @@ def _RKCK45_kernel( number_of_threads: int,
                 nb.float64[:],
                 nb.float64[:],
                 nb.float64[:],
+                nb.float64[:],
                 nb.float64,
                 nb.float64
     ), device=True, inline=True)
@@ -480,6 +501,7 @@ def _RKCK45_kernel( number_of_threads: int,
                            l_actual_state,
                            l_error,
                            l_control_parameter,
+                           s_shared_parameter,
                            l_accessories,
                            l_actual_time,
                            l_time_step):
@@ -500,7 +522,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                 k1,
                                 l_actual_state,
                                 l_accessories,
-                                l_control_parameter)
+                                l_control_parameter,
+                                s_shared_parameter)
 
 
         # K2 ---------------------
@@ -513,7 +536,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                 k2,
                                 x, 
                                 l_accessories,
-                                l_control_parameter)
+                                l_control_parameter,
+                                s_shared_parameter)
         
         # K3 --------------------
         t = l_actual_time + l_time_step * (3.0 / 10.0)
@@ -527,7 +551,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                 k3,
                                 x,
                                 l_accessories,
-                                l_control_parameter)
+                                l_control_parameter,
+                                s_shared_parameter)
         
         # K4 -------------------
         t = l_actual_time + l_time_step * (3.0 / 5.0)
@@ -542,7 +567,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                 k4,
                                 x, 
                                 l_accessories,
-                                l_control_parameter)
+                                l_control_parameter,
+                                s_shared_parameter)
         
         # K5 -------------------
         t = l_actual_time + l_time_step
@@ -558,7 +584,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                 k5,
                                 x,
                                 l_accessories,
-                                l_control_parameter)
+                                l_control_parameter,
+                                s_shared_parameter)
 
         # K6 ---------------------
         t = l_actual_time + l_time_step * (7.0 / 8.0)
@@ -575,7 +602,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                 k6,
                                 x, 
                                 l_accessories,
-                                l_control_parameter)
+                                l_control_parameter,
+                                s_shared_parameter)
         
         # NEW STATE AND ERROR -------------------------
         for i in nb.prange(SD):
@@ -607,6 +635,7 @@ def _RKCK45_kernel( number_of_threads: int,
                 nb.float64[:],
                 nb.float64[:],
                 nb.float64[:],
+                nb.float64[:],
                 nb.float64,
                 nb.float64,
                 nb.float64,
@@ -617,6 +646,7 @@ def _RKCK45_kernel( number_of_threads: int,
     def single_system_per_thread(number_of_threads,
                                 actual_state,
                                 control_parameter,
+                                shared_parameter,
                                 accessories,
                                 time_domain,
                                 actual_time,
@@ -627,6 +657,16 @@ def _RKCK45_kernel( number_of_threads: int,
                                 time_step_shrink_limit):
         
         tid = cuda.threadIdx.x + cuda.blockIdx.x*cuda.blockDim.x
+
+        # SHARED MEMORY MANAGEMENT
+        s_shared_parameter = cuda.shared.array((NSP, ) if NSP !=0 else (1, ), dtype=nb.float64)
+        num_sp_fill = NSP // cuda.blockDim.x + (0 if NSP % cuda.blockDim.x == 0 else 1)
+        for i in nb.prange(num_sp_fill):
+            s_tid = cuda.threadIdx.x + i * cuda.blockDim.x
+            if s_tid < NSP:
+                s_shared_parameter[s_tid] = shared_parameter[s_tid]
+
+        cuda.syncthreads()
 
         # RKCK 45 algo
         if tid < number_of_threads:
@@ -666,7 +706,8 @@ def _RKCK45_kernel( number_of_threads: int,
                             l_time_domain,
                             l_actual_state,
                             l_accessories,
-                            l_control_parameter)
+                            l_control_parameter,
+                            s_shared_parameter)
             
             if NE > 0:
                 per_thread_event_function(  tid,
@@ -674,7 +715,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                             l_actual_event_value,
                                             l_actual_state,
                                             l_accessories,
-                                            l_control_parameter)
+                                            l_control_parameter,
+                                            s_shared_parameter)
 
             cuda.syncthreads()
             while l_terminate == False:
@@ -697,6 +739,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                     l_actual_state,
                                     l_error,
                                     l_control_parameter,
+                                    s_shared_parameter,
                                     l_accessories,
                                     l_actual_time,
                                     l_time_step)
@@ -713,6 +756,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                     l_actual_state,
                                     l_error,
                                     l_control_parameter,
+                                    s_shared_parameter,
                                     l_accessories,
                                     l_actual_time,
                                     l_time_step)
@@ -741,7 +785,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                         l_next_event_value,
                                         l_next_state,
                                         l_accessories,
-                                        l_control_parameter)
+                                        l_control_parameter,
+                                        s_shared_parameter)
 
                     l_update_step, \
                     l_new_time_step = per_thread_event_time_step_control(
@@ -767,7 +812,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                         l_actual_time,
                                         l_actual_state,
                                         l_accessories,
-                                        l_control_parameter)
+                                        l_control_parameter,
+                                        s_shared_parameter)
 
                     if NE > 0:
                         l_event_terminal = False
@@ -781,7 +827,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                     l_time_domain,
                                     l_actual_state,
                                     l_accessories,
-                                    l_control_parameter):
+                                    l_control_parameter,
+                                    s_shared_parameter):
                                     l_event_terminal = True
                                 
                         per_thread_event_function(
@@ -790,7 +837,8 @@ def _RKCK45_kernel( number_of_threads: int,
                             l_actual_event_value,
                             l_actual_state,
                             l_accessories,
-                            l_control_parameter)
+                            l_control_parameter,
+                            s_shared_parameter)
 
                     if l_time_domain_ends or l_event_terminal or l_user_terminal:
                         l_terminate = True
@@ -802,7 +850,8 @@ def _RKCK45_kernel( number_of_threads: int,
                             l_time_domain,
                             l_actual_state,
                             l_accessories,
-                            l_control_parameter)
+                            l_control_parameter,
+                            s_shared_parameter)
 
             cuda.syncthreads()
             # Integration ends, wrtite data back to global memory

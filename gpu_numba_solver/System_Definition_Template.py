@@ -4,8 +4,8 @@ import math
 
 
 # ----------- ODE FUNCTION ---------
-@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_ode_function(tid, t, dx, x, acc, cp):
+@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
+def per_thread_ode_function(tid, t, dx, x, acc, cp, sp):
 
     ''' TODO: Add correct docstring
     Implement thr RHS of the ODE here
@@ -17,25 +17,25 @@ def per_thread_ode_function(tid, t, dx, x, acc, cp):
 
 
 # ---------- ACCESSORIES --------------
-@cuda.jit(nb.boolean(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_action_after_timesteps(tid, t, x, acc, cp):
+@cuda.jit(nb.boolean(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
+def per_thread_action_after_timesteps(tid, t, x, acc, cp, sp):
     return False
 
 
-@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_initialization(tid, t, td, x, acc, cp):
+@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
+def per_thread_initialization(tid, t, td, x, acc, cp, sp):
     pass
 
 
-@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_finalization(tid, t, td, x, acc, cp):
+@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
+def per_thread_finalization(tid, t, td, x, acc, cp, sp):
     pass
 
 # -------------- EVENTS ---------------
-@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_event_function(tid, t, ev, x, acc, cp):
+@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
+def per_thread_event_function(tid, t, ev, x, acc, cp, sp):
     pass
 
-@cuda.jit(nb.boolean(nb.int32, nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_action_after_event_detection(tid, idx, t, td, x, acc, cp):
+@cuda.jit(nb.boolean(nb.int32, nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
+def per_thread_action_after_event_detection(tid, idx, t, td, x, acc, cp, sp):
     return False

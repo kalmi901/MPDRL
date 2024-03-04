@@ -57,7 +57,7 @@ def fill_solver_object(solver: SolverObject,
 
             # Equation properties 
             for (k, f) in CP.items():
-                solver.set_host(problem_number, "control_parameter", k, f(**MAT_PROPS, **EQ_PROPS))
+                solver.set_host(problem_number, "control_parameters", k, f(**MAT_PROPS, **EQ_PROPS))
 
 
             problem_number += 1

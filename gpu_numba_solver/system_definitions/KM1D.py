@@ -108,8 +108,8 @@ def _UAC(t, x, cp):
 
 
 # ----------- ODE FUNCTION ---------
-@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_ode_function(tid, t, dx, x, acc, cp):
+@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
+def per_thread_ode_function(tid, t, dx, x, acc, cp, sp):
 
     ''' TODO: Add correct docstring
     Implement thr RHS of the ODE here
@@ -148,21 +148,21 @@ def per_thread_ode_function(tid, t, dx, x, acc, cp):
 
 
 # ---------- ACCESSORIES --------------
-@cuda.jit(nb.boolean(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_action_after_timesteps(tid, t, x, acc, cp):
+@cuda.jit(nb.boolean(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
+def per_thread_action_after_timesteps(tid, t, x, acc, cp, sp):
     return False
 
 
-@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_initialization(tid, t, td, x, acc, cp):
+@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
+def per_thread_initialization(tid, t, td, x, acc, cp, sp):
 
     x[4] = 0.0         # Primary Bjerknes Force Integral
     x[5] = 0.0         # Drag Forca Integral
     acc[2] = x[1]      # Initial Bubble Position
 
 
-@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_finalization(tid, t, td, x, acc, cp):
+@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
+def per_thread_finalization(tid, t, td, x, acc, cp, sp):
 
     # Calculate the time-averaged Bjerknes force
     dt = td[1] - td[0]
