@@ -3,4 +3,5 @@ gpu_numba_solver/__pycache__/*
 gpu_numba_solver/system_definitions/__pycache__/*
 env/__pycache__/*
 simple_models/__pycache__
+system_definitions/__pycache__
 
