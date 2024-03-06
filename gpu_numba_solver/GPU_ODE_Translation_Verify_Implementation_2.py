@@ -1,9 +1,9 @@
 import numpy as np
 import time
-from system_definitions import KM1D
-from system_definitions.KM1D import CP, DEFAULT_MAT_PROPS, DEFAULT_EQ_PROPS, DEFAULT_SOLVER_OPTS
+from system_definitions import KM1D_d
+from system_definitions.KM1D_d import CP, DEFAULT_MAT_PROPS, DEFAULT_EQ_PROPS, DEFAULT_SOLVER_OPTS
 import GPU_ODE
-GPU_ODE.setup(KM1D)
+GPU_ODE.setup(KM1D_d)
 from GPU_ODE import SolverObject
 import matplotlib.pyplot as plt
 

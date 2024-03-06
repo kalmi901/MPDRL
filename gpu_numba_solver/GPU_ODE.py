@@ -6,9 +6,9 @@ from typing import Union
 from types import ModuleType
 
 try:
-    from gpu_numba_solver.System_Definition_Template import *
+    from gpu_numba_solver.system_definition_template import *
 except:
-    from System_Definition_Template import *
+    from system_definition_template import *
 
 
 # ---------------------------------------------------------------
@@ -44,7 +44,8 @@ class SolverObject():
     def __init__(self, 
                 number_of_threads : int,
                 system_dimension  : int,
-                number_of_control_parameters : int,
+                number_of_control_parameters : int = 0,
+                number_of_dynamic_parameters : int = 0,
                 number_of_shared_parameters: int = 0,
                 number_of_accessories : int = 1,
                 number_of_events: int = 0,
@@ -66,6 +67,7 @@ class SolverObject():
         self._system_dimension = system_dimension
         self._number_of_threads = number_of_threads
         self._number_of_control_parameters = number_of_control_parameters
+        self._number_of_dynamic_parameters = number_of_dynamic_parameters
         self._number_of_shared_parameters = number_of_shared_parameters
         self._number_of_accessories = number_of_accessories
         self._number_of_events = number_of_events
@@ -127,7 +129,8 @@ class SolverObject():
         self._size_of_actual_time  = number_of_threads
         self._size_of_actual_state = system_dimension * number_of_threads
         self._size_of_accessories  = max(number_of_accessories * number_of_threads, 1)
-        self._size_of_control_parameters = number_of_control_parameters * number_of_threads
+        self._size_of_control_parameters = max(number_of_control_parameters * number_of_threads, 1)
+        self._size_of_dynamic_parameteters = max(number_of_dynamic_parameters * number_of_threads, 1)
         self._size_of_shared_parameters = max(self._number_of_shared_parameters, 1)
         # TODO: Add more if necessary
 
@@ -137,6 +140,7 @@ class SolverObject():
         self._h_actual_state = cuda.pinned_array((self._size_of_actual_state, ), dtype=np.float64)
         self._h_accessories  = cuda.pinned_array((self._size_of_accessories, ), dtype=np.float64)
         self._h_control_parameters = cuda.pinned_array((self._size_of_control_parameters, ), np.float64)
+        self._h_dynamic_parameters = cuda.pinned_array((self._size_of_dynamic_parameteters, ), dtype=np.float64)
         self._h_shared_parameters = cuda.pinned_array((self._size_of_shared_parameters, ), np.float64)
 
         # ---- Device side (private) arrays -----
@@ -145,12 +149,14 @@ class SolverObject():
         self._d_actual_state = cuda.device_array_like(self._h_actual_state)
         self._d_accessories  = cuda.device_array_like(self._h_accessories)
         self._d_control_parameters = cuda.device_array_like(self._h_control_parameters)
+        self._d_dynamic_parameters = cuda.device_array_like(self._h_dynamic_parameters)
         self._d_shared_parameters = cuda.device_array_like(self._h_shared_parameters)
 
         # ---- Create / Compile the Kenel function -----
         self._njit_cuda_kernel = _RKCK45_kernel(self._number_of_threads,
                                                 self._system_dimension,
                                                 self._number_of_control_parameters,
+                                                self._number_of_dynamic_parameters,
                                                 self._number_of_shared_parameters,
                                                 self._number_of_accessories,
                                                 self._number_of_events,
@@ -167,6 +173,7 @@ class SolverObject():
                                 self._number_of_threads,
                                 self._d_actual_state,
                                 self._d_control_parameters,
+                                self._d_dynamic_parameters,
                                 self._d_shared_parameters,
                                 self._d_accessories,
                                 self._d_time_domain,
@@ -191,10 +198,19 @@ class SolverObject():
             self._h_actual_state[idx] = np.float64(value)
         elif property == "control_parameters":
             self._h_control_parameters[idx] = np.float64(value)
+        elif property == "dynamic_parameters":
+            self._h_dynamic_parameters[idx] = np.float64(value)
         elif property == "accessories":
             self._h_accessories[idx] = np.float64(value)
         else:
             print("Error: SetHost")
+
+    def set_shared_host(self, property: str, index, value):
+        if property == "shared_parameters":
+            self._h_shared_parameters[index] = np.float64(value)
+        else:
+            print("Error: Sethost. Not a valid property.")
+
 
     def get_host(self, thread_id: int, property: str, index: int):
 
@@ -206,17 +222,27 @@ class SolverObject():
             return self._h_actual_state[idx]
         elif property == "control_parameters":
             return self._h_control_parameters[idx]
+        elif property == "dynamic_parameters":
+            return self._h_control_parameters[idx]
         elif property == "accessories":
             return self._h_accessories[idx]
         else:
             print("Error: GetHost")
             return None
+        
+    def get_shared_host(self, property: str, index):
+        if property == "shared_parameters":
+            return self._h_shared_parameters[index]
+        else:
+            print("Error: Gethost. Not a valid property.")
 
     def syncronize_h2d(self, property:str):
         if property == "time_domain":
             self._d_time_domain.copy_to_device(self._h_time_domain)
         elif property == "control_parameters":
             self._d_control_parameters.copy_to_device(self._h_control_parameters)
+        elif property == "dynamic_parameters":
+            self._d_dynamic_parameters.copy_to_device(self._h_dynamic_parameters)
         elif property == "shared_parameters":
             self._d_shared_parameters.copy_to_device(self._h_shared_parameters)
         elif property == "actual_state":
@@ -226,6 +252,7 @@ class SolverObject():
         elif property == "all":
             self._d_time_domain.copy_to_device(self._h_time_domain)
             self._d_control_parameters.copy_to_device(self._h_control_parameters)
+            self._d_dynamic_parameters.copy_to_device(self._h_dynamic_parameters)
             self._d_shared_parameters.copy_to_device(self._h_shared_parameters)
             self._d_actual_state.copy_to_device(self._h_actual_state)
             self._d_accessories.copy_to_device(self._h_accessories)
@@ -239,6 +266,8 @@ class SolverObject():
             self._d_time_domain.copy_to_host(self._h_time_domain)
         elif property == "control_parameters":
             self._d_control_parameters.copy_to_host(self._h_control_parameters)
+        elif property == "dynamic_parameters":
+            self._d_dynamic_parameters.copy_to_host(self._h_dynamic_parameters)
         elif property == "shared_parameters":
             self._d_shared_parameters.copy_to_host(self._h_shared_parameters)
         elif property == "actual_state":
@@ -248,6 +277,7 @@ class SolverObject():
         elif property == "all":
             self._d_time_domain.copy_to_host(self._h_time_domain)
             self._d_control_parameters.copy_to_host(self._h_control_parameters)
+            self._d_dynamic_parameters.copy_to_host(self._h_dynamic_parameters)
             self._d_shared_parameters.copy_to_host(self._h_shared_parameters)
             self._d_actual_state.copy_to_host(self._h_actual_state)
             self._d_accessories.copy_to_host(self._h_accessories)
@@ -263,6 +293,7 @@ class SolverObject():
 def _RKCK45_kernel( number_of_threads: int,
                     system_dimension: int,
                     number_of_control_parameters: int,
+                    number_of_dynamic_parameters: int,
                     number_of_shared_parameters: int,
                     number_of_accessories: int,
                     number_of_events: int,
@@ -277,6 +308,7 @@ def _RKCK45_kernel( number_of_threads: int,
     NT  = number_of_threads
     SD  = system_dimension
     NCP = number_of_control_parameters
+    NDP = number_of_dynamic_parameters
     NSP = number_of_shared_parameters
     NA  = number_of_accessories
     NE  = number_of_events
@@ -406,6 +438,7 @@ def _RKCK45_kernel( number_of_threads: int,
                 nb.float64[:],
                 nb.float64[:],
                 nb.float64[:],
+                nb.float64[:],
                 nb.float64,
                 nb.float64
     ), device=True, inline=True)
@@ -414,6 +447,7 @@ def _RKCK45_kernel( number_of_threads: int,
                             l_actual_state,
                             l_error,
                             l_control_parameter,
+                            l_dynamic_parameter,
                             s_shared_parameter,
                             l_accessories,
                             l_actual_time,
@@ -432,6 +466,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 l_actual_state,
                                 l_accessories,
                                 l_control_parameter,
+                                l_dynamic_parameter,
                                 s_shared_parameter)
         
         # K2 ----------------------------
@@ -446,6 +481,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 x, 
                                 l_accessories,
                                 l_control_parameter,
+                                l_dynamic_parameter,
                                 s_shared_parameter)
         
         # K3 ----------------------------
@@ -459,6 +495,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 x,
                                 l_accessories,
                                 l_control_parameter,
+                                l_dynamic_parameter,
                                 s_shared_parameter)
 
         # K4 -------------------------------
@@ -474,6 +511,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 x,
                                 l_accessories,
                                 l_control_parameter,
+                                l_dynamic_parameter,
                                 s_shared_parameter)
 
         # NEW STATE -------------------------
@@ -493,6 +531,7 @@ def _RKCK45_kernel( number_of_threads: int,
                 nb.float64[:],
                 nb.float64[:],
                 nb.float64[:],
+                nb.float64[:],
                 nb.float64,
                 nb.float64
     ), device=True, inline=True)
@@ -501,6 +540,7 @@ def _RKCK45_kernel( number_of_threads: int,
                            l_actual_state,
                            l_error,
                            l_control_parameter,
+                           l_dynamic_parameter,
                            s_shared_parameter,
                            l_accessories,
                            l_actual_time,
@@ -523,6 +563,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 l_actual_state,
                                 l_accessories,
                                 l_control_parameter,
+                                l_dynamic_parameter,
                                 s_shared_parameter)
 
 
@@ -537,6 +578,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 x, 
                                 l_accessories,
                                 l_control_parameter,
+                                l_dynamic_parameter,
                                 s_shared_parameter)
         
         # K3 --------------------
@@ -552,6 +594,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 x,
                                 l_accessories,
                                 l_control_parameter,
+                                l_dynamic_parameter,
                                 s_shared_parameter)
         
         # K4 -------------------
@@ -568,6 +611,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 x, 
                                 l_accessories,
                                 l_control_parameter,
+                                l_dynamic_parameter,
                                 s_shared_parameter)
         
         # K5 -------------------
@@ -585,6 +629,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 x,
                                 l_accessories,
                                 l_control_parameter,
+                                l_dynamic_parameter,
                                 s_shared_parameter)
 
         # K6 ---------------------
@@ -603,6 +648,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 x, 
                                 l_accessories,
                                 l_control_parameter,
+                                l_dynamic_parameter,
                                 s_shared_parameter)
         
         # NEW STATE AND ERROR -------------------------
@@ -636,6 +682,7 @@ def _RKCK45_kernel( number_of_threads: int,
                 nb.float64[:],
                 nb.float64[:],
                 nb.float64[:],
+                nb.float64[:],
                 nb.float64,
                 nb.float64,
                 nb.float64,
@@ -646,6 +693,7 @@ def _RKCK45_kernel( number_of_threads: int,
     def single_system_per_thread(number_of_threads,
                                 actual_state,
                                 control_parameter,
+                                dynamic_parameter,
                                 shared_parameter,
                                 accessories,
                                 time_domain,
@@ -676,7 +724,8 @@ def _RKCK45_kernel( number_of_threads: int,
             l_actual_state = cuda.local.array((SD, ), dtype=nb.float64)
             l_next_state = cuda.local.array((SD, ), dtype=nb.float64)
             l_error = cuda.local.array((SD, ), dtype=nb.float64)
-            l_control_parameter = cuda.local.array((NCP, ), dtype=nb.float64)
+            l_control_parameter = cuda.local.array((NCP, ) if NCP !=0 else (1, ), dtype=nb.float64)
+            l_dynamic_parameter = cuda.local.array((NDP, ) if NDP !=0 else (1, ), dtype=nb.float64)
             l_accessories = cuda.local.array((NA, ) if NA !=0 else (1, ), dtype=nb.float64)
             l_actual_event_value = cuda.local.array((NE, ) if NE !=0 else (1, ), dtype=nb.float64)
             l_next_event_value = cuda.local.array((NE, ) if NE !=0 else (1, ), dtype=nb.float64)
@@ -689,6 +738,9 @@ def _RKCK45_kernel( number_of_threads: int,
 
             for i in nb.prange(NCP):
                 l_control_parameter[i] = control_parameter[tid + i*NT]
+
+            for i in nb.prange(NDP):
+                l_dynamic_parameter[i] = dynamic_parameter[tid + i*NT]
 
             for i in nb.prange(NA):
                 l_accessories[i] = accessories[tid + i*NT]
@@ -707,6 +759,7 @@ def _RKCK45_kernel( number_of_threads: int,
                             l_actual_state,
                             l_accessories,
                             l_control_parameter,
+                            l_dynamic_parameter,
                             s_shared_parameter)
             
             if NE > 0:
@@ -716,6 +769,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                             l_actual_state,
                                             l_accessories,
                                             l_control_parameter,
+                                            l_dynamic_parameter,
                                             s_shared_parameter)
 
             cuda.syncthreads()
@@ -739,6 +793,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                     l_actual_state,
                                     l_error,
                                     l_control_parameter,
+                                    l_dynamic_parameter,
                                     s_shared_parameter,
                                     l_accessories,
                                     l_actual_time,
@@ -756,6 +811,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                     l_actual_state,
                                     l_error,
                                     l_control_parameter,
+                                    l_dynamic_parameter,
                                     s_shared_parameter,
                                     l_accessories,
                                     l_actual_time,
@@ -786,6 +842,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                         l_next_state,
                                         l_accessories,
                                         l_control_parameter,
+                                        l_dynamic_parameter,
                                         s_shared_parameter)
 
                     l_update_step, \
@@ -813,6 +870,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                         l_actual_state,
                                         l_accessories,
                                         l_control_parameter,
+                                        l_dynamic_parameter,
                                         s_shared_parameter)
 
                     if NE > 0:
@@ -828,6 +886,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                     l_actual_state,
                                     l_accessories,
                                     l_control_parameter,
+                                    l_dynamic_parameter,
                                     s_shared_parameter):
                                     l_event_terminal = True
                                 
@@ -838,6 +897,7 @@ def _RKCK45_kernel( number_of_threads: int,
                             l_actual_state,
                             l_accessories,
                             l_control_parameter,
+                            l_dynamic_parameter,
                             s_shared_parameter)
 
                     if l_time_domain_ends or l_event_terminal or l_user_terminal:
@@ -851,6 +911,7 @@ def _RKCK45_kernel( number_of_threads: int,
                             l_actual_state,
                             l_accessories,
                             l_control_parameter,
+                            l_dynamic_parameter,
                             s_shared_parameter)
 
             cuda.syncthreads()
@@ -863,6 +924,9 @@ def _RKCK45_kernel( number_of_threads: int,
 
             for i in nb.prange(NCP):
                 control_parameter[tid + i*NT] = l_control_parameter[i]
+
+            for i in nb.prange(NDP):
+                dynamic_parameter[tid +i*NT] = l_dynamic_parameter[i]
 
             for i in nb.prange(NA):
                 accessories[tid + i*NT] = l_accessories[i]

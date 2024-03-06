@@ -4,8 +4,8 @@ import math
 
 # ----------------- ODE Solver Parameters ------------------
 DEFAULT_SOLVER_OPTS = {
-    "SD"  : 4,              # System Dimensios (r, u, x, v, Fb1, Fd)
-    "NCP" : 12,             # Number of Control Parameters
+    "SD"  : 8,              # System Dimensios (r, u, x, v, Fb1, Fd)
+    "NCP" : 24,             # Number of Control Parameters
     "NDP" : 4,              # Number of Dynamic Parameters
     "NSP" : 5,              # Number of Shared Parameters
     "NACC": 5,              # Number of Accessories
@@ -15,7 +15,6 @@ DEFAULT_SOLVER_OPTS = {
     "RTOL" : 1e-9,          # Relative Tolerance
     "NT": 1,                # Number of threads (at least on active thread requidred)
 }
-
 
 # -------------- Global Model Constants Parameters ----------
 # Material Properties
@@ -31,30 +30,31 @@ DEFAULT_MAT_PROPS = {
 
 # Equation Properties (Default values in SI Units
 DEFAULT_EQ_PROPS = {
-    "k"     : 2,                    # Number of Harmonic Components
-    "R0"    : 44.8 * 1e-6,          # Equilibrium Radius (micron)
-    "FREQ"  : [25.0*1e3, 50.0],     # Excitation frequencies (Hz)       
-    "PA"    : [0.8*0e5, 0.0*1e5],   # Pressure Amplotude (bar)
-    "PS"    : [0.0, 0.0],           # Phase Shift (radians)
-    "REL_FREQ" : 25.0*1e3,          # Relative Frequency (kHz)
+    "k"     : 2,                        # Number of Harmonic Components
+    "R0"    : [44.8*1e-6, 44.8*1e-6],   # Equilibrium Radius (micron)
+    "FREQ"  : [25.0*1e3, 50.0*1e3],     # Excitation frequencies (Hz)       
+    "PA"    : [0.8*0e5, 0.0*1e5],       # Pressure Amplotude (bar)
+    "PS"    : [0.0, 0.0],               # Phase Shift (radians)
+    "REL_FREQ" : 25.0*1e3,              # Relative Frequency (kHz)
 }
+
 
 # -------------- Control Parameters -----------------
 CP = {
-    0 : lambda **kwargs : (2.0 * kwargs["ST"] / kwargs["R0"] + kwargs["P0"] - kwargs["PV"]) 
-                            * (1.0 / kwargs["R0"] / kwargs["REL_FREQ"])**2.0 / kwargs["RHO"],
-    1 : lambda **kwargs : (1.0 - 3.0*kwargs["PE"]) * (2 * kwargs["ST"] / kwargs["R0"] + kwargs["P0"]- kwargs["PV"]) 
-                            * (1.0 / kwargs["R0"] / kwargs["REL_FREQ"]) / kwargs["CL"] / kwargs["RHO"],
-    2 : lambda **kwargs : (kwargs["P0"] - kwargs["PV"]) * (1.0 / kwargs["R0"] / kwargs["REL_FREQ"])**2.0 / kwargs["RHO"], 
-    3 : lambda **kwargs : (2.0 * kwargs["ST"] / kwargs["R0"] / kwargs["RHO"]) * (1.0 / kwargs["R0"] / kwargs["REL_FREQ"])**2.0,
-    4 : lambda **kwargs : 4.0 * kwargs["VIS"] / kwargs["RHO"] / (kwargs["R0"]**2.0) * (1.0 / kwargs["REL_FREQ"]),
-    5 : lambda **kwargs : ((1.0 / kwargs["R0"] / kwargs["REL_FREQ"])**2.0) / kwargs["RHO"],
-    6 : lambda **kwargs : ((1.0 / kwargs["REL_FREQ"])** 2.0) / kwargs["CL"] / kwargs["RHO"] / kwargs["R0"],
-    7 : lambda **kwargs : kwargs["R0"] * kwargs["REL_FREQ"] / kwargs["CL"],
-    8 : lambda **kwargs : (0.5 * kwargs["CL"] / kwargs["REL_FREQ"] / kwargs["R0"])**2,
-    9 : lambda **kwargs : 1.0 / (kwargs["RHO"] * kwargs["CL"] * kwargs["REL_FREQ"] * (2.0 * math.pi) * (kwargs["R0"]**3)),
-    10: lambda **kwargs : 4.0 * math.pi / 3.0 * kwargs["R0"]**3.0,
-    11: lambda **kwargs : 12.0 * math.pi * kwargs["VIS"] * kwargs["R0"],
+    0 : lambda i, **kwargs : (2.0 * kwargs["ST"] / kwargs["R0"][i] + kwargs["P0"] - kwargs["PV"]) 
+                            * (1.0 / kwargs["R0"][i] / kwargs["REL_FREQ"])**2.0 / kwargs["RHO"],
+    1 : lambda i, **kwargs : (1.0 - 3.0*kwargs["PE"]) * (2 * kwargs["ST"] / kwargs["R0"][i] + kwargs["P0"]- kwargs["PV"]) 
+                            * (1.0 / kwargs["R0"][i] / kwargs["REL_FREQ"]) / kwargs["CL"] / kwargs["RHO"],
+    2 : lambda i, **kwargs : (kwargs["P0"] - kwargs["PV"]) * (1.0 / kwargs["R0"][i] / kwargs["REL_FREQ"])**2.0 / kwargs["RHO"], 
+    3 : lambda i, **kwargs : (2.0 * kwargs["ST"] / kwargs["R0"][i]/ kwargs["RHO"]) * (1.0 / kwargs["R0"][i] / kwargs["REL_FREQ"])**2.0,
+    4 : lambda i, **kwargs : 4.0 * kwargs["VIS"] / kwargs["RHO"] / (kwargs["R0"][i]**2.0) * (1.0 / kwargs["REL_FREQ"]),
+    5 : lambda i, **kwargs : ((1.0 / kwargs["R0"][i] / kwargs["REL_FREQ"])**2.0) / kwargs["RHO"],
+    6 : lambda i, **kwargs : ((1.0 / kwargs["REL_FREQ"])** 2.0) / kwargs["CL"] / kwargs["RHO"] / kwargs["R0"][i],
+    7 : lambda i, **kwargs : kwargs["R0"][i] * kwargs["REL_FREQ"] / kwargs["CL"],
+    8 : lambda i, **kwargs : (0.5 * kwargs["CL"] / kwargs["REL_FREQ"] / kwargs["R0"][i])**2,
+    9 : lambda i, **kwargs : 1.0 / (kwargs["RHO"] * kwargs["CL"] * kwargs["REL_FREQ"] * (2.0 * math.pi) * (kwargs["R0"][i]**3)),
+    10: lambda i, **kwargs : 4.0 * math.pi / 3.0 * kwargs["R0"][i]**3.0,
+    11: lambda i, **kwargs : 12.0 * math.pi * kwargs["VIS"] * kwargs["R0"][i],
 }
 
 SP = {
@@ -102,8 +102,6 @@ def _GRADP(t, x, sp, dp):
 def _UAC(t, x, sp, dp):
     return 0.0
 
-
-
 # ------------------- ODE Functions -----------------------
 @cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
 def per_thread_ode_function(tid, t, dx, x, acc, cp, dp, sp):
@@ -126,12 +124,3 @@ def per_thread_ode_function(tid, t, dx, x, acc, cp, dp, sp):
     dx[1] = x[3]
     dx[2] = N * rD
     dx[3] = 3*(Fb1+Fd)*cp[9]*rx0*rx0*rx0 - 3.0*x[2]*rx0*x[3]
-
-
-# --------------------- ACCESSORIES --------------------------
-@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_finalization(tid, t, td, x, acc, cp, dp, sp):
-    dt = td[1] - td[0]
-    # Increase the time domain by dt
-    td[0] += 1.0 * dt
-    td[1] += 1.0 * dt
