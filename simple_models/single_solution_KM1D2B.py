@@ -205,7 +205,7 @@ def setup(ac_field, k):
 
     # ------------------ ODE Function ---------------------
 
-    #@nb.njit(__ODE_FUN_SIG)
+    @nb.njit(__ODE_FUN_SIG)
     def _ode_function(t, x, cp, sp, dp):
         """
         Dimensionless Keller--Miksis equation for pair-bubbles coupled wiht 1 dimensional translational motion \n
