@@ -9,7 +9,7 @@ import numba as nb
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 from typing import List, Optional, Callable
-
+import pandas as pd
 
 # MATERIAL PROPERTIES (SI UNITS)
 PV  = 0.0       # Vapour Pressure [Pa]
@@ -205,7 +205,7 @@ def setup(ac_field, k):
 
     # ------------------ ODE Function ---------------------
 
-    @nb.njit(__ODE_FUN_SIG)
+    #@nb.njit(__ODE_FUN_SIG)
     def _ode_function(t, x, cp, sp, dp):
         """
         Dimensionless Keller--Miksis equation for pair-bubbles coupled wiht 1 dimensional translational motion \n
@@ -240,7 +240,6 @@ def setup(ac_field, k):
         rx0 = 1.0 / x0i
         p = rx0**sp[0]
 
-
         N = (cp[0] + cp[1]*x2i) * p \
                 - cp[2] * (1 + cp[7]*x2i) - cp[3]* rx0 - cp[4]*x2i*rx0 \
                 - 1.5 * (1.0 - cp[7]*x2i * (1.0/3.0))*x2i*x2i \
@@ -254,15 +253,14 @@ def setup(ac_field, k):
         D = x0i - cp[7]*x0i*x2i + cp[4]*cp[7]
         rD = 1.0 / D
 
-        vi = cp[12] * x0i*x0i * rd*rd * (s*x2i + x0i*x3i*rd)
+        vj = cp[12] * x0j*x0j * rd*rd * (-s*x2j + x0j*x3j*rd)
 
         Fb1 = - cp[10]*x0i*x0i*x0i * _GRADP(t, x1i, sp, dp)                         # Primary Bjerknes Force
-        Fd  = - cp[11]*x0i * (x3i*sp[3] - _UAC(t, x1i, sp, dp) - np.flip(vi))       # Drag Force
+        Fd  = - cp[11]*x0i * (x3i*sp[3] - _UAC(t, x1i, sp, dp) - vj)                # Drag Force
 
         du = 3*(Fb1+Fd)*cp[9]*rx0*rx0*rx0 - 3.0*x2i*rx0*x3i \
             + cp[14] *rd*rd*x0j * (-s*x2j * (x0j*x2i + 2*x0i*x2j)
                                    +x0j*rd*x3j * (x0j*x2i + 5*x0i*x2j) ) * rx0
-
 
 
         A = np.eye(4)
@@ -394,7 +392,7 @@ class DualBubble:
         self.cp[11] = 12 * np.pi * VIS * self._R0
 
         # Coupling Constants
-        self.cp[12] = (self._R0 / lr)**3 * CL
+        self.cp[12] = (np.flip(self._R0) / lr)**3 * CL
         self.cp[13] = np.flip(self._R0)**3 / self._R0**2 / lr
         self.cp[14] = 3*(np.flip(self._R0) / lr)**3
         self.cp[15] = self._R0 / lr
@@ -432,6 +430,10 @@ if __name__ == "__main__":
 
     t, r, _, x, _ = km_bubbles.integrate()
 
+
+    #pd.DataFrame(np.hstack((t[:, np.newaxis], r[0][:, np.newaxis], r[1][:, np.newaxis],
+    #                       x[0][:, np.newaxis], x[1][:, np.newaxis])),
+    #                       dtype=np.float64).to_csv("KM2B_SOL_DEBUG.csv", header=False, index=False)
 
     plt.figure(1)
     plt.plot(t, r[0], "k-")
