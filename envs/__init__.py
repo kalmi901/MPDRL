@@ -1,2 +1,2 @@
 from .bubble_env import BubbleGPUEnv
-from .single_bubble_position_control import Pos1DControl
+from .pos_1b_1d import Pos1B1D

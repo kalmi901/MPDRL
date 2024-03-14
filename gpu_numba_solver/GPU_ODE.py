@@ -32,7 +32,11 @@ __SYSTEM_DEF_FUNCTIONS = ["per_thread_ode_function",
                           "per_thread_event_function",
                           "per_thread_action_after_event_detection"]
 
-def setup(system_definition: ModuleType):
+def setup(system_definition: ModuleType, **kwargs):
+
+    if hasattr(system_definition, "setup"):
+        system_definition.setup(**kwargs)
+
     for func_name in __SYSTEM_DEF_FUNCTIONS:
         if hasattr(system_definition, func_name):
             globals()[func_name] = getattr(system_definition, func_name)

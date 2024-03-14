@@ -1,6 +1,16 @@
-from envs import Pos1DControl
+from envs import Pos1B1D
 
 
 
 if __name__ == "__main__":
-    venc = Pos1DControl(1024)
+    venc = Pos1B1D(16)
+
+    venc.reset()
+
+    for ic in range(10):
+
+        venc.step()
+        venc.render()
+
+        input()
+

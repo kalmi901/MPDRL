@@ -33,8 +33,8 @@ DEFAULT_MAT_PROPS = {
 DEFAULT_EQ_PROPS = {
     "k"     : 2,                    # Number of Harmonic Components
     "R0"    : 44.8 * 1e-6,          # Equilibrium Radius (micron)
-    "FREQ"  : [25.0*1e3, 50.0],     # Excitation frequencies (Hz)       
-    "PA"    : [0.8*0e5, 0.0*1e5],   # Pressure Amplotude (bar)
+    "FREQ"  : [25.0*1e3, 50.0*1e3], # Excitation frequencies (Hz)       
+    "PA"    : [0.8*1e5, 0.0*1e5],   # Pressure Amplotude (bar)
     "PS"    : [0.0, 0.0],           # Phase Shift (radians)
     "REL_FREQ" : 25.0*1e3,          # Relative Frequency (kHz)
 }
@@ -74,58 +74,109 @@ DP = {
 
 
 __AC_FUN_SIG = nb.float64(nb.float64, nb.float64, nb.float64[:], nb.float64[:])
-# ----------------- ACOUSTIC FIELD ------------------------
-k = DEFAULT_EQ_PROPS["k"]
-@cuda.jit(__AC_FUN_SIG, device=True, inline=True)
-def _PA(t, x, sp, dp):
-    p = 0.0
-    for i in range(k):
-        p += dp[i] * math.sin(2*math.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+def setup(k=DEFAULT_EQ_PROPS["k"], ac_field="CONST"):
+    global _PA, _PAT, _GRADP, _UAC
+    global per_thread_ode_function
 
-    return p
+    print("Initialize the ode system")
+    print(f"Number of harmonoc compoentes: {k}")
+    print(f"Acoustic field type: {ac_field}")
+
+    # ----------------- ACOUSTIC FIELD ------------------------
+    if ac_field == "CONST":
+        @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
+        def _PA(t, x, sp, dp):
+            p = 0.0
+            for i in range(k):
+                p += dp[i] * math.sin(2*math.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+
+            return p
 
 
-@cuda.jit(__AC_FUN_SIG, device=True, inline=True)
-def _PAT(t, x, sp, dp):
-    pt = 0.0
-    for i in range(k):
-        pt+= dp[i] * dp[k + i] \
-                    * math.cos(2*math.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+        @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
+        def _PAT(t, x, sp, dp):
+            pt = 0.0
+            for i in range(k):
+                pt+= dp[i] * dp[k + i] \
+                            * math.cos(2*math.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+                
+            return pt
+
+        @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
+        def _GRADP(t, x, sp, dp):
+            return 0.0
+
+        @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
+        def _UAC(t, x, sp, dp):
+            return 0.0
+    
+    elif ac_field == "SW_A":
+        # TODO!!!!!!!!
+        pass
+
+    elif ac_field == "SW_N":
+        @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
+        def _PA(t, x, sp, dp):
+            p = 0.0
+            for i in range(k):
+                p += dp[i]  * math.sin(2*math.pi*sp[2]*dp[3*k + i] * x + dp[2*k + i]) \
+                            * math.sin(2*math.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+            return p
         
-    return pt
+        @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
+        def _PAT(t, x, sp, dp):
+            pt = 0.0
+            for i in range(k):
+                pt+= dp[i] * dp[k + i] \
+                           * math.sin(2*math.pi*sp[2]*dp[3*k + i] * x + dp[2*k + i]) \
+                           * math.cos(2*math.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+            return pt
+                
+        @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
+        def _GRADP(t, x, sp, dp):
+            px = 0.0
+            for i in range(k):
+                px+= dp[i] * dp[3*k + i] \
+                           * math.cos(2*math.pi*sp[2]*dp[3*k + i] * x + dp[2*k + i]) \
+                           * math.sin(2*math.pi*sp[1]*dp[  k + i] * t + dp[2*k + i]) 
+            return px
+        
+        @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
+        def _UAC(t, x, sp, dp):
+            ux = 0.0
+            for i in range(k):
+                ux+=-dp[i] * sp[4] \
+                           * math.cos(2*math.pi*sp[2]*dp[3*k +i] * x + dp[2*k + i]) \
+                           * math.cos(2*math.pi*sp[1]*dp[  k +i] * t + dp[2*k + i])
+            return ux
 
-@cuda.jit(__AC_FUN_SIG, device=True, inline=True)
-def _GRADP(t, x, sp, dp):
-    return 0.0
-
-@cuda.jit(__AC_FUN_SIG, device=True, inline=True)
-def _UAC(t, x, sp, dp):
-    return 0.0
+    else:
+        print("Acoustic field type is not correct!")
+        exit()
 
 
+    # ------------------- ODE Functions -----------------------
+    @cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
+    def per_thread_ode_function(tid, t, dx, x, acc, cp, dp, sp):
+        rx0 = 1.0 / x[0]
+        p = rx0**sp[0]
 
-# ------------------- ODE Functions -----------------------
-@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_ode_function(tid, t, dx, x, acc, cp, dp, sp):
-    rx0 = 1.0 / x[0]
-    p = rx0**sp[0]
+        N = (cp[0] + cp[1]*x[2]) * p \
+                - cp[2] * (1 + cp[7]*x[2]) - cp[3]* rx0 - cp[4]*x[2]*rx0 \
+                - 1.5 * (1.0 - cp[7]*x[2] * (1.0/3.0))*x[2]*x[2] \
+                - (1 + cp[7]*x[2]) * cp[5] * _PA(t, x[1], sp, dp) - cp[6] * _PAT(t, x[1], sp, dp) * x[0] \
+                + cp[8] * x[3]*x[3]                                       # Feedback term
 
-    N = (cp[0] + cp[1]*x[2]) * p \
-            - cp[2] * (1 + cp[7]*x[2]) - cp[3]* rx0 - cp[4]*x[2]*rx0 \
-            - 1.5 * (1.0 - cp[7]*x[2] * (1.0/3.0))*x[2]*x[2] \
-            - (1 + cp[7]*x[2]) * cp[5] * _PA(t, x[1], sp, dp) - cp[6] * _PAT(t, x[1], sp, dp) * x[0] \
-            + cp[8] * x[3]*x[3]                                       # Feedback term
+        D = x[0] - cp[7]*x[0]*x[2] + cp[4]*cp[7]
+        rD = 1.0 / D
 
-    D = x[0] - cp[7]*x[0]*x[2] + cp[4]*cp[7]
-    rD = 1.0 / D
+        Fb1 = - cp[10]*x[0]*x[0]*x[0] * _GRADP(t, x[1], sp, dp)           # Primary Bjerknes Force
+        Fd  = - cp[11]*x[0] * (x[3]*sp[3] - _UAC(t, x[1], sp, dp) )       # Drag Force
 
-    Fb1 = - cp[10]*x[0]*x[0]*x[0] * _GRADP(t, x[1], sp, dp)           # Primary Bjerknes Force
-    Fd  = - cp[11]*x[0] * (x[3]*sp[3] - _UAC(t, x[1], sp, dp) )       # Drag Force
-
-    dx[0] = x[2]
-    dx[1] = x[3]
-    dx[2] = N * rD
-    dx[3] = 3*(Fb1+Fd)*cp[9]*rx0*rx0*rx0 - 3.0*x[2]*rx0*x[3]
+        dx[0] = x[2]
+        dx[1] = x[3]
+        dx[2] = N * rD
+        dx[3] = 3*(Fb1+Fd)*cp[9]*rx0*rx0*rx0 - 3.0*x[2]*rx0*x[3]
 
 
 # --------------------- ACCESSORIES --------------------------
