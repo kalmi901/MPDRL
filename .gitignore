@@ -1,8 +1,12 @@
 __pycache__/*
 gpu_numba_solver/__pycache__/*
 gpu_numba_solver/__pycache__
-env/__pycache__
-env/__pycache__/*
+envs/__pycache__
+envs/__pycache__/*
+envs/common/__pycache__
+envs/common/__pycache__/*
+rl_algos/__pycache__
+rl_algos/__pycache__/*
 simple_models/__pycache__
 simple_models/__pycache__/*
 gpu_numba_solver/system_definitions/__pycache__

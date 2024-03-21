@@ -4,6 +4,7 @@ from matplotlib import pyplot as plt
 from typing import List, Optional, Union
 
 from envs import BubbleGPUEnv
+from envs import ActionSpaceDict
 
 from envs.common import VSpace
 from envs.common import SpaceType
@@ -27,21 +28,39 @@ SOLVER_OPTS = DEFAULT_SOLVER_OPTS.copy()
 class Pos1B1D(BubbleGPUEnv):
     def __init__(self,
                  num_envs: int = 1, 
-                 R0: float = 50.0,
-                 components: int = 2,
-                 freqs : List[float] = [25.0, 50.0],
+                 R0: float = 40.0,
+                 components: int = 1,
+                 ac_type: str = "SW_N",
+                 freqs : List[float] = [25.0],
+                 pa : List[float] = [1.0],
+                 phase_shift : List[float] = [0.0], 
+                 action_space_dict: ActionSpaceDict = ActionSpaceDict({"IDX": [0], "MIN": [0.0], "MAX": [0.5], "TYPE": "Box"},
+                                                                      {"IDX": [0], "MIN": [0.0], "MAX": [0.25*torch.pi], "TYPE": "Box"}),
                  rel_freq: Optional[float] = None,
-                 phase_shift : List[float] = [0.0, 0.0], 
                  stacked_frames: int = 2,
                  bubble_posistion_limits: tuple = (0.0, 0.25),
                  target_position_limits: tuple = (0.0, 0.25),
-                 episode_length: int = 20,
+                 episode_length: int = 200,
                  time_step_length: Union[int, float] = 50,
                  seed: int = None,) -> None:
 
         # Update Global Dictionaries
+        super().__init__(num_envs=num_envs,
+                        action_space_dict=action_space_dict,
+                        seed=seed)
+        
+        
         SOLVER_OPTS["NT"] = num_envs
         EQ_PROPS["k"] = components
+        if all(len(lst) == components for lst in [freqs, pa, phase_shift]):
+            for i in range(components):
+                EQ_PROPS["FREQ"][i] = freqs[i] * 1.0e3
+                EQ_PROPS["PS"][i]   = phase_shift[i]
+                EQ_PROPS["PA"][i]   = pa[i] * 1.0e5 
+        else:
+            print("Err: The number of components differs from the length of the provided parameter lists.")
+            exit()
+        EQ_PROPS["REL_FREQ"] = EQ_PROPS["FREQ"][0] if rel_freq == None else rel_freq * 1.0e3
 
 
         # Physical Parameters
@@ -51,9 +70,13 @@ class Pos1B1D(BubbleGPUEnv):
         self.target_position_limits  = target_position_limits
         self.episode_length          = episode_length
         self.time_step_length        = float(time_step_length) if isinstance(time_step_length, int) else time_step_length
-        
+        self.action_space_dict       = action_space_dict
+        self.components              = components
+
         # Configure Solver Object ---------------------------------------
-        GPU_ODE.setup(KM1D, k=components, ac_field="CONST")
+        if ac_type not in ["CONST", "SW_N", "SW_A"]: 
+            print("Err: Acoustic field type is not supported!")
+        GPU_ODE.setup(KM1D, k=EQ_PROPS["k"], ac_field=ac_type)
         self.num_envs = num_envs
         self.solver = SolverObject(
             number_of_threads=SOLVER_OPTS["NT"],
@@ -74,18 +97,6 @@ class Pos1B1D(BubbleGPUEnv):
                                      dtype=torch.float64,
                                      seed=seed)
         
-        
-        #super().__init__()
-
-
-        #super().__init__(num_envs, single_action_space, single_observation_space)
-
-
-
-    def step(self, action: torch.Tensor=None):
-        self.solver.solve_my_ivp()
-        self._get_observations()
-        print("Step: Done")
 
 
 
@@ -94,7 +105,7 @@ class Pos1B1D(BubbleGPUEnv):
             self.solver.set_host(tid, "time_domain",  0, 0.0)
             self.solver.set_host(tid, "time_domain",  1, self.time_step_length)
             self.solver.set_host(tid, "actual_state", 0, 1.0)
-            self.solver.set_host(tid, "actual_state", 1, 99.0)
+            self.solver.set_host(tid, "actual_state", 1, 0.0)
             self.solver.set_host(tid, "actual_state", 2, 0.0)
             self.solver.set_host(tid, "actual_state", 3, 0.0)
 
@@ -104,11 +115,9 @@ class Pos1B1D(BubbleGPUEnv):
         self.solver.syncronize_h2d("all")
         
         self.actual_observation = self.observation_space.sample()
-        print("from reset:")
-        print(self.actual_observation)
+        self.actual_action      = self.action_space.sample()
         # Copy positions to device
-        # TODO: Add to GPU ode to avoid mixing functionalities
-        self.solver._d_actual_state[self.num_envs:2*self.num_envs].copy_to_device(cuda.as_cuda_array(self.actual_observation[:,1].contiguous()))
+        self.solver.set_device_array("actual_state", 1, self.actual_observation[:,1].contiguous())
     
 
     def render(self):
@@ -122,7 +131,6 @@ class Pos1B1D(BubbleGPUEnv):
             self.fig = plt.figure(1, figsize=(12, 7))
             ax0 = self.fig.add_subplot(1, 1, 1)
         finally:
-
             ax0.plot([id for id in range(self.num_envs)], target,   "g.", markersize=10)
             ax0.plot([id for id in range(self.num_envs)], position, "b.", markersize=10)
             ax0.set_ylim(min(self.bubble_posistion_limits)-0.015, max(self.bubble_posistion_limits)+0.015)
@@ -137,12 +145,25 @@ class Pos1B1D(BubbleGPUEnv):
 
 
     def _get_rewards(self):
-        return super()._get_rewards()
+        return 1.0
     
     def _get_observations(self):
         self.actual_observation[:, 2] = self.actual_observation[:, 1]
-        self.actual_observation[:, 1] = torch.tensor(self.solver._d_actual_state[self.num_envs:2*self.num_envs])
+        self.actual_observation[:, 1] = torch.tensor(self.solver.get_device_array("actual_state", 1))
     
+    def _set_action(self):
+        shift = 0
+        if self.action_space_dict.PA is not None:
+            for idx in self.action_space_dict.PA["IDX"]:
+                self.solver.set_device_array("dynamic_parameters", idx, self.actual_action[:,idx].contiguous().to(dtype=torch.float64) * 1.0e5)
+                shift +=1
+        if self.action_space_dict.PS is not None:
+            k = self.components*2
+            for idx in self.action_space_dict.PS["IDX"]:
+                self.solver.set_device_array("dynamic_parameters", idx+k, self.actual_action[:,shift+idx].contiguous().to(dtype=torch.float64))
+        if self.action_space_dict.FR is not None:
+            pass
+
     def _fill_control_parameters(self):
         # Equation properties
         for tid in range(self.num_envs):

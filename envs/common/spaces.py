@@ -35,6 +35,14 @@ class VSpace(ABC):
     def sample(self) -> torch.Tensor:
         raise NotImplementedError
     
+    def zeros(self, device: Optional[str] = None) -> torch.Tensor:
+        return torch.zeros(size=self._shape,
+                           device=self.device if device == None else device)
+    
+    def ones(self, device: Optional[str] = None) -> torch.Tensor:
+        return torch.ones(size=self._shape,
+                           device=self.device if device == None else device)
+    
     @property
     def shape(self) -> tuple[int]:
         return self._shape

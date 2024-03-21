@@ -190,6 +190,52 @@ class SolverObject():
         cuda.synchronize()
 
 
+    # -------- Properties --------
+    # ----------------------------
+    def get_device_array(self, property: str, index: int):
+
+        if property == "shared_parameters":
+            return self._d_shared_parameters
+        else:
+            idx0 = index * self._number_of_threads
+            idxN = idx0  + self._number_of_threads
+            if property == "time_domain":
+                pass
+            elif property == "actual_state":
+                return self._d_actual_state[idx0:idxN]
+            elif property == "control_parameters":
+                pass
+            elif property == "dynamic_parameters":
+                return self._d_dynamic_parameters[idx0:idxN]
+            elif property == "accessories":
+                pass
+        
+            
+
+    
+    def set_device_array(self, property: str, index: int, d_ary):
+
+        if property == "shared_parameters":
+            pass
+        else:
+            idx0 = index * self._number_of_threads
+            idxN = idx0  + self._number_of_threads
+            assert len(d_ary) == self._number_of_threads, print("Err: The length of the array does not match with the number of thread")
+
+            if property == "time_domain":
+                pass
+            elif property == "actual_state":
+                self._d_actual_state[idx0:idxN].copy_to_device(cuda.as_cuda_array(d_ary))
+            elif property == "control_parameters":
+                pass
+            elif property == "dynamic_parameters":
+                self._d_dynamic_parameters[idx0:idxN].copy_to_device(cuda.as_cuda_array(d_ary))
+            elif property == "accessories":
+                pass
+
+    
+
+
     # ----  Helper functions -----
     #-----------------------------
     def set_host(self, thread_id: int, property: str, index: int, value: float) :
@@ -364,7 +410,7 @@ def _RKCK45_kernel( number_of_threads: int,
             time_step_multiplicator = 0.9 * math.pow(relative_error, (1.0/4.0))
 
         if math.isfinite(time_step_multiplicator) == False:
-            print("State is not finite")
+            print('Thread id ',tid,'State is not finite')
             l_is_finite = False
 
 
@@ -374,12 +420,13 @@ def _RKCK45_kernel( number_of_threads: int,
 
             if l_time_step < time_step_min*1.01:
                 l_terminate_thread = True
-                print('State is not a finite number even with the minimal step size')
+                print('Thread id ',tid,'State is not a finite number even with the minimal step size')
 
         else:
             if (l_time_step < time_step_min*1.01):
-                print('Minimum time step is reached')
-                l_update_step = True
+                print('Thread id ',tid,': Minimum time step is reached')
+                #l_update_step = True
+                l_terminate_thread = True
 
         time_step_multiplicator = min(time_step_multiplicator, time_step_growth_limit)
         time_step_multiplicator = max(time_step_multiplicator, time_step_shrink_limit)
