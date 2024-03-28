@@ -143,9 +143,10 @@ class SolverObject():
         self._h_actual_time  = cuda.pinned_array((self._size_of_actual_time, ), dtype=np.float64)
         self._h_actual_state = cuda.pinned_array((self._size_of_actual_state, ), dtype=np.float64)
         self._h_accessories  = cuda.pinned_array((self._size_of_accessories, ), dtype=np.float64)
-        self._h_control_parameters = cuda.pinned_array((self._size_of_control_parameters, ), np.float64)
+        self._h_control_parameters = cuda.pinned_array((self._size_of_control_parameters, ), dtype=np.float64)
         self._h_dynamic_parameters = cuda.pinned_array((self._size_of_dynamic_parameteters, ), dtype=np.float64)
-        self._h_shared_parameters = cuda.pinned_array((self._size_of_shared_parameters, ), np.float64)
+        self._h_shared_parameters = cuda.pinned_array((self._size_of_shared_parameters, ), dtype=np.float64)
+        self._h_status = cuda.pinned_array((number_of_threads, ), dtype=np.int8)
 
         # ---- Device side (private) arrays -----
         self._d_time_domain  = cuda.device_array_like(self._h_time_domain)
@@ -155,6 +156,7 @@ class SolverObject():
         self._d_control_parameters = cuda.device_array_like(self._h_control_parameters)
         self._d_dynamic_parameters = cuda.device_array_like(self._h_dynamic_parameters)
         self._d_shared_parameters = cuda.device_array_like(self._h_shared_parameters)
+        self._d_status = cuda.device_array_like(self._h_status)
 
         # ---- Create / Compile the Kenel function -----
         self._njit_cuda_kernel = _RKCK45_kernel(self._number_of_threads,
@@ -182,6 +184,7 @@ class SolverObject():
                                 self._d_accessories,
                                 self._d_time_domain,
                                 self._d_actual_time,
+                                self._d_status,
                                 self.time_step_init,
                                 self.time_step_max,
                                 self.time_step_min,
@@ -189,6 +192,21 @@ class SolverObject():
                                 self.time_step_shrink_limit)
         cuda.synchronize()
 
+    def status(self):
+        """
+        Algorithm termination:
+            -1: integration failure,
+             0: time_domain end is reached
+            +1: termination event occured
+        """
+        self._d_status.copy_to_host(self._h_status)
+        cuda.synchronize()
+
+        return np.array(self._h_status, dtype=np.int8)
+
+
+    def syncronize(self):
+        cuda.synchronize()
 
     # -------- Properties --------
     # ----------------------------
@@ -238,6 +256,24 @@ class SolverObject():
 
     # ----  Helper functions -----
     #-----------------------------
+    def set_device(self, thread_id: int, property: str, index, value: float):
+
+        idx = thread_id + index * self._number_of_threads
+
+        if property == "time_domain":
+            self._d_time_domain[idx] = np.float64(value)
+        elif property == "actual_state":
+            self._d_actual_state[idx] = np.float64(value)
+        elif property == "control_parameters":
+            self._d_control_parameters[idx] = np.float64(value)
+        elif property == "dynamic_parameters":
+            self._d_dynamic_parameters[idx] = np.float64(value)
+        elif property == "accessories":
+            self._d_accessories[idx] = np.float64(value)
+        else:
+            print("Error: set_device")
+    
+    
     def set_host(self, thread_id: int, property: str, index: int, value: float) :
 
         idx = thread_id + index * self._number_of_threads
@@ -425,7 +461,7 @@ def _RKCK45_kernel( number_of_threads: int,
         else:
             if (l_time_step < time_step_min*1.01):
                 print('Thread id ',tid,': Minimum time step is reached')
-                #l_update_step = True
+                l_update_step = False
                 l_terminate_thread = True
 
         time_step_multiplicator = min(time_step_multiplicator, time_step_growth_limit)
@@ -734,6 +770,7 @@ def _RKCK45_kernel( number_of_threads: int,
                 nb.float64[:],
                 nb.float64[:],
                 nb.float64[:],
+                nb.int8[:],
                 nb.float64,
                 nb.float64,
                 nb.float64,
@@ -749,6 +786,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 accessories,
                                 time_domain,
                                 actual_time,
+                                status,
                                 time_step_init,
                                 time_step_max,
                                 time_step_min,
@@ -780,6 +818,7 @@ def _RKCK45_kernel( number_of_threads: int,
             l_accessories = cuda.local.array((NA, ) if NA !=0 else (1, ), dtype=nb.float64)
             l_actual_event_value = cuda.local.array((NE, ) if NE !=0 else (1, ), dtype=nb.float64)
             l_next_event_value = cuda.local.array((NE, ) if NE !=0 else (1, ), dtype=nb.float64)
+            l_status = 0
 
             for i in nb.prange(2):
                 l_time_domain[i] = time_domain[tid + i*NT]
@@ -854,6 +893,7 @@ def _RKCK45_kernel( number_of_threads: int,
                         print("State is not finite")
                         l_terminate = 1
                         l_new_time_step = time_step_init
+                        l_status = -1
 
                 elif ALGO == "RKCK45":
                     l_is_finite = per_thread_stepper_RKCK45(
@@ -883,6 +923,8 @@ def _RKCK45_kernel( number_of_threads: int,
                                         time_step_shrink_limit,
                                         l_update_step,
                                         l_is_finite)
+                    if l_terminate:
+                        l_status = -1
 
                 # NEW EVENT VALUE AND TIME STEP CONTROL
                 if NE > 0:
@@ -940,6 +982,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                     l_dynamic_parameter,
                                     s_shared_parameter):
                                     l_event_terminal = True
+                                    l_status = 1
                                 
                         per_thread_event_function(
                             tid,
@@ -983,6 +1026,7 @@ def _RKCK45_kernel( number_of_threads: int,
                 accessories[tid + i*NT] = l_accessories[i]
 
             actual_time[tid] = l_actual_time
+            status[tid] = l_status
 
 
     return single_system_per_thread

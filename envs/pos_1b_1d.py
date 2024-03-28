@@ -34,13 +34,13 @@ class Pos1B1D(BubbleGPUEnv):
                  freqs : List[float] = [25.0],
                  pa : List[float] = [1.0],
                  phase_shift : List[float] = [0.0], 
-                 action_space_dict: ActionSpaceDict = ActionSpaceDict({"IDX": [0], "MIN": [0.0], "MAX": [0.5], "TYPE": "Box"},
+                 action_space_dict: ActionSpaceDict = ActionSpaceDict({"IDX": [0], "MIN": [0.0], "MAX": [1.5], "TYPE": "Box"},
                                                                       {"IDX": [0], "MIN": [0.0], "MAX": [0.25*torch.pi], "TYPE": "Box"}),
                  rel_freq: Optional[float] = None,
                  stacked_frames: int = 2,
                  bubble_posistion_limits: tuple = (0.0, 0.25),
                  target_position_limits: tuple = (0.0, 0.25),
-                 episode_length: int = 200,
+                 episode_length: int = 10,
                  time_step_length: Union[int, float] = 50,
                  seed: int = None,) -> None:
 
@@ -98,6 +98,11 @@ class Pos1B1D(BubbleGPUEnv):
                                      seed=seed)
         
 
+        self.single_observation_space_shape = self.observation_space.single_shape
+        self.single_action_space_shape      = self.action_space.single_shape
+        self.single_action_space_low        = self.action_space.low
+        self.single_action_space_high       = self.action_space.high
+
 
 
     def reset(self, **options):
@@ -142,10 +147,58 @@ class Pos1B1D(BubbleGPUEnv):
             plt.show(block=False)
             plt.pause(0.01)
 
+    def _reset_subenvs(self, dones):
+        self.actual_observation[dones] = self.observation_space.sample()[dones]
+        self.total_reward[dones]    *=0
+        self.steps_done[dones]      *= 0
 
+        for tid in dones:
+            self.solver.set_device(tid, "time_domain",  0, 0.0)
+            self.solver.set_device(tid, "time_domain",  1, self.time_step_length)
+            self.solver.set_device(tid, "actual_state", 0, 1.0)
+            self.solver.set_device(tid, "actual_state", 0, 1.0)
+            self.solver.set_device(tid, "actual_state", 1, 0.0)
+            self.solver.set_device(tid, "actual_state", 2, 0.0)
+            self.solver.set_device(tid, "actual_state", 3, 0.0)
 
-    def _get_rewards(self):
-        return 1.0
+            """ If R0 changes between episodes
+            EQ_PROPS["R0"] = self.R0[tid].item()
+            for (k, f) in CP.items():
+                self.solver.set_device(tid, "control_parameters", k, f(**MAT_PROPS, **EQ_PROPS))
+            """
+
+        self.solver.syncronize()
+        self.solver.set_device_array("actual_state", 1, self.actual_observation[:,1].contiguous())
+
+    def _final_observation_and_reset(self):
+        dones = torch.nonzero(torch.logical_or(self.actual_terminated, self.actual_time_out) == True).squeeze()
+
+        if len(dones) > 0:
+            self.actual_info ={
+            "final_observation" : self.actual_observation[dones],
+            "dones"             : dones,
+            "episode_return"    : self.total_reward[dones],
+            "episode_length"    : self.steps_done[dones]
+            }
+
+            self._reset_subenvs(dones)
+
+    def _get_terminal_and_rewards(self):
+        # Check for Integration Failures
+        fail_idx = torch.nonzero(torch.tensor(self.solver.status()) != 0).squeeze()
+        self.actual_terminated[fail_idx] = True
+
+        # Check for timeouts
+        time_out_idx = torch.nonzero(self.steps_done == self.episode_length).squeeze()
+        self.actual_time_out[time_out_idx] = True
+
+        self.actual_reward = 1 - (self.actual_observation[:, 0] - self.actual_observation[:, 1]) / 0.25
+
+        # Penalize for failure!
+        self.actual_reward[fail_idx] = - 100
+
+        self.total_reward += self.actual_reward        
+
     
     def _get_observations(self):
         self.actual_observation[:, 2] = self.actual_observation[:, 1]

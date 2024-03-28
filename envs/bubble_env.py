@@ -60,8 +60,16 @@ class BubbleGPUEnv(ABC):
 
         self._create_observation_space()
         self._create_action_space(action_space_dict)
-            
 
+        # Placeholders ....
+        self.actual_observation = None
+        self.steps_done         = torch.zeros((self.num_envs, ), dtype=torch.int64, device="cuda")
+        self.actual_reward      = torch.zeros((self.num_envs, ), dtype=torch.float32, device="cuda")
+        self.total_reward       = torch.zeros((self.num_envs, ), dtype=torch.float32, device="cuda")
+        self.actual_time_out    = torch.full((self.num_envs, ), False, dtype=torch.bool, device="cuda")
+        self.actual_terminated  = torch.full((self.num_envs, ), False, dtype=torch.bool, device="cuda")
+        self.actual_info        = {}
+            
 
     def _create_observation_space(self):
         pass
@@ -99,12 +107,27 @@ class BubbleGPUEnv(ABC):
             self.actual_action = action
         self._set_action()
         self.solver.solve_my_ivp()
+        self.steps_done +=1
+        self.actual_info = {}
+        self.actual_time_out.fill_(False)
+        self.actual_terminated.fill_(False)
         self._get_observations()
-        self._get_rewards()
-        print("Step: Done")
+        self._get_terminal_and_rewards()
+        self._final_observation_and_reset()
+
+        return (self.actual_observation,
+                self.actual_reward,
+                self.actual_time_out,
+                self.actual_terminated,
+                self.actual_info)
     
     @abstractmethod
     def reset(self, seed: int, **options):
+        raise NotImplementedError
+    
+    
+    @abstractmethod
+    def _final_observation_and_reset(self):
         raise NotImplementedError
     
     @abstractmethod
@@ -112,7 +135,7 @@ class BubbleGPUEnv(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def _get_rewards(self):
+    def _get_terminal_and_rewards(self):
         raise NotImplementedError
     
     @abstractmethod

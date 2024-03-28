@@ -1,15 +1,16 @@
 from envs import Pos1B1D
-
+import numpy as np
 
 
 if __name__ == "__main__":
-    venc = Pos1B1D(1024)
+    venvs = Pos1B1D(512)
 
-    venc.reset()
+    venvs.reset()
 
     for ic in range(500):
 
-        venc.step(venc.action_space.sample())
-        venc.render()
+        obs, reward, _, _, info =venvs.step(venvs.action_space.sample())
+        venvs.render()
+
 
        

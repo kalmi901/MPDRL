@@ -27,6 +27,7 @@ class VSpace(ABC):
             torch.manual_seed(self.seed)
 
         self._shape = None
+        self._single_shape = None
         self._dtype = None
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -46,6 +47,10 @@ class VSpace(ABC):
     @property
     def shape(self) -> tuple[int]:
         return self._shape
+    
+    @property
+    def single_shape(self) -> tuple[int]:
+        return self._single_shape
     
     @property
     def dtype(self) -> torch.dtype:
@@ -72,6 +77,7 @@ class Discrete(VSpace):
         self.n = n
         self.start = start
         self._shape = (self.num_envs, 1)
+        self._single_shape = (1, )
         self._dtype = torch.long
 
     def sample(self, device: Optional[str] = None) -> torch.Tensor:
@@ -113,6 +119,7 @@ class Box(VSpace):
         assert self.high.shape == self.low.shape, "Err: observation dimension is not correct!"
 
         self._shape = (self.num_envs, self._size)
+        self._single_shape = (self._size, )
      
     def sample(self, device: Optional[str] = None) -> torch.Tensor:
         device = self.device if device == None else device
