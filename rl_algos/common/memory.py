@@ -12,6 +12,7 @@ class RolloutBuffer():
         
         self.device = device
         self.dtype = dtype
+        self.buffer_size = rollout_steps
 
         # Data Containers
         self.observations = torch.zeros((rollout_steps, num_envs) + single_observation_space_shape, dtype=self.dtype, device=self.device)
@@ -20,6 +21,55 @@ class RolloutBuffer():
         self.rewards      = torch.zeros((rollout_steps, num_envs), dtype=self.dtype, device=self.device)
         self.values       = torch.zeros((rollout_steps, num_envs), dtype=self.dtype, device=self.device)
         self.dones        = torch.zeros((rollout_steps, num_envs), dtype=self.dtype, device=self.device)
+
+        self.advantages   = torch.zeros((rollout_steps, num_envs), dtype=self.dtype, device=self.device)
+        self.returns      = torch.zeros((rollout_steps, num_envs), dtype=self.dtype, device=self.device)
+
+    def store_transition(self,
+                         step: int,
+                         observations: torch.Tensor,
+                         actions: torch.Tensor,
+                         logprobs: torch.Tensor,
+                         rewards: torch.Tensor,
+                         values: torch.Tensor,
+                         dones: torch.Tensor):
+        
+        if step > self.buffer_size:
+            raise IndexError (" some error message here  ")
+        
+        self.observations[step] = observations.to(self.device)
+        self.actions[step]      = actions.to(self.device)
+        self.logprobs[step]     = logprobs.to(self.device)
+        self.rewards[step]      = rewards.to(self.device)
+        self.values[step]       = values.to(self.device)
+        self.dones[step]        = dones.to(self.device)
+
+    def compute_gae_estimate(self, last_values: torch.Tensor, last_dones: torch.Tensor,  gamma: float, gae_lambda: float):
+
+        lastgaelam = 0
+        for t in reversed(range(self.buffer_size)):
+            if t == self.buffer_size - 1:
+                nextnonterminal = 1.0 - last_dones.to(dtype=self.dtype, device=self.device)
+                nextvalues = last_values.to(self.device)
+            else:
+                nextnonterminal = 1.0 - self.dones[t + 1]
+                nextvalues = self.values[t + 1]
+            
+            delta = self.rewards[t] + gamma * nextvalues * nextnonterminal - self.values[t]
+            self.advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+        self.returns = self.advantages + self.values
+
+    def sample(self, device: str = "cuda"):
+        # Return flattan data
+        b_obs       = self.observations.view((-1, self.observations.shape[-1])).to(device)
+        b_logprobs  = self.logprobs.view(-1).to(device)
+        b_actions   = self.actions.view((-1, self.actions.shape[-1])).to(device)
+        b_advantages= self.advantages.view(-1).to(device)
+        b_returns   = self.returns.view(-1).to(device)
+        b_values    = self.values.view(-1).to(device)
+
+        return b_obs, b_logprobs, b_actions, b_advantages, b_returns, b_values
+
 
 
 class ExperienceBuffer():

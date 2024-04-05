@@ -45,10 +45,10 @@ class ModifiedSyncVectorEnv(SyncVectorEnv):
         if isinstance(actions, np.ndarray):
             next_obs, rewards, terminateds, truncateds, infos = super().step(actions)
 
-        next_obs    = torch.tensor(next_obs, device="cuda")
-        rewards     = torch.tensor(rewards, device="cuda")
-        terminateds = torch.tensor(terminateds, device="cuda")
-        truncateds  = torch.tensor(truncateds, device="cuda")
+        next_obs    = torch.tensor(next_obs, device="cuda", dtype=torch.float32)
+        rewards     = torch.tensor(rewards, device="cuda", dtype=torch.float32)
+        terminateds = torch.tensor(terminateds, device="cuda", dtype=torch.float32)
+        truncateds  = torch.tensor(truncateds, device="cuda", dtype=torch.float32)
 
         my_infos = {}
         if 'final_observation' in infos.keys():

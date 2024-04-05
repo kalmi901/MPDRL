@@ -23,8 +23,7 @@ except:
 # Neural Networks ----------
 class Critic(nn.Module):
     def __init__(self, 
-                 single_observation_space_shape: tuple,
-                 single_action_space_shape: tuple,
+                 venvs: Any,
                  fc_dims: List[int] = None,
                  fc_acts: List[str] = None) -> None:
         super().__init__()
@@ -33,8 +32,8 @@ class Critic(nn.Module):
             fc_acts is not None and 
             len(fc_dims) == len(fc_acts)):
             print("Critic is created with custom parameters")
-            self.qf = build_torch_network(input_dim=np.array(single_observation_space_shape).prod() \
-                                                   +np.prod(single_action_space_shape),
+            self.qf = build_torch_network(input_dim=np.array(venvs.single_observation_space.shape).prod() \
+                                                   +np.prod(venvs.single_action_space.shape),
                                           output_dim=1,
                                           fc_dims=fc_dims,
                                           fc_acts=fc_acts)
@@ -42,7 +41,7 @@ class Critic(nn.Module):
         else:
             print("Critic is created with default parameters")
             self.qf = nn.Sequential(
-                nn.Linear(np.array(single_observation_space_shape).prod() + np.prod(single_action_space_shape), 256),
+                nn.Linear(np.array(venvs.single_observation_space.shape).prod() + np.prod(venvs.single_action_space.shape), 256),
                 nn.ReLU(),
                 nn.Linear(256, 256),
                 nn.ReLU(),
@@ -55,10 +54,7 @@ class Critic(nn.Module):
 
 class Actor(nn.Module):
     def __init__(self,
-                 single_observation_space_shape: tuple,
-                 single_action_space_shape: tuple,
-                 action_space_high: torch.Tensor,
-                 action_space_low: torch.Tensor,
+                 venvs: Any,
                  fc_dims: List[int] = None,
                  fc_acts: List[str] = None) -> None:
         super().__init__()
@@ -67,8 +63,8 @@ class Actor(nn.Module):
            fc_acts is not None and
            len(fc_dims) == len(fc_acts)):
             print("Actor is created with custom parameters")
-            self.pi = build_torch_network(input_dim=np.array(single_observation_space_shape).prod(),
-                                          output_dim=np.prod(single_action_space_shape),
+            self.pi = build_torch_network(input_dim=np.array(venvs.single_observation_space.shape).prod(),
+                                          output_dim=np.prod(venvs.single_action_space.shape),
                                           fc_dims=fc_dims,
                                           fc_acts=fc_acts,
                                           last_act="Tanh")
@@ -76,22 +72,22 @@ class Actor(nn.Module):
         else:
             print("Actor is created with default parameters")
             self.pi =  nn.Sequential(
-                nn.Linear(np.array(single_observation_space_shape).prod(), 256),
+                nn.Linear(np.array(venvs.single_observation_space.shape).prod(), 256),
                 nn.ReLU(),
                 nn.Linear(256, 256),
                 nn.ReLU(),
-                nn.Linear(256, np.prod(single_action_space_shape)),
+                nn.Linear(256, np.prod(venvs.single_action_space.shape)),
                 nn.Tanh()
             )
 
         self.register_buffer(
             "action_scale", 
-            torch.tensor((action_space_high - action_space_low) / 2.0 )
+            torch.tensor((venvs.single_action_space.high - venvs.single_action_space.low) / 2.0 )
             )
         
         self.register_buffer(
             "action_bias",
-            torch.tensor((action_space_high + action_space_low) / 2.0)
+            torch.tensor((venvs.single_action_space.high + venvs.single_action_space.low) / 2.0)
             )
         
     def forward(self, x: torch.Tensor):
@@ -152,28 +148,20 @@ class DDPG():
         # Neural networks ---------------------------------
         if net_archs is None:
             # Actor Network (Policy)
-            self.pi = Actor(venvs.single_observation_space_shape, venvs.single_action_space_shape, 
-                            venvs.single_action_space_high, venvs.single_action_space_low).to(self.device)
-            self.pi_target = Actor(venvs.single_observation_space_shape, venvs.single_action_space_shape,
-                                   venvs.single_action_space_high, venvs.single_action_space_low).to(self.device)
+            self.pi = Actor(venvs).to(self.device)
+            self.pi_target = Actor(venvs).to(self.device)
 
             # Critic Network (Action-Value Function)
-            self.qf = Critic(venvs.single_observation_space_shape, venvs.single_action_space_shape).to(self.device)
-            self.qf_target = Critic(venvs.single_observation_space_shape, venvs.single_action_space_shape).to(self.device)
+            self.qf = Critic(venvs).to(self.device)
+            self.qf_target = Critic(venvs).to(self.device)
         elif net_archs is not None:
             # Actor Network (Policy)
-            self.pi = Actor(venvs.single_observation_space_shape, venvs.single_action_space_shape,
-                            venvs.single_action_space_high, venvs.single_action_space_low,
-                            net_archs["pi"][0], net_archs["pi"][1]).to(self.device)
-            self.pi_target = Actor(venvs.single_observation_space_shape, venvs.single_action_space_shape,
-                                   venvs.single_action_space_high, venvs.single_action_space_low,
-                                   net_archs["pi"][0], net_archs["pi"][1]).to(self.device)
+            self.pi = Actor(venvs, net_archs["pi"][0], net_archs["pi"][1]).to(self.device)
+            self.pi_target = Actor(venvs, net_archs["pi"][0], net_archs["pi"][1]).to(self.device)
 
             # Critic Network (Action-Value Function)
-            self.qf = Critic(venvs.single_observation_space_shape, venvs.single_action_space_shape,
-                             net_archs["qf"][0], net_archs["qf"][1]).to(self.device)
-            self.qf_target = Critic(venvs.single_observation_space_shape, venvs.single_action_space_shape,
-                                    net_archs["qf"][0], net_archs["qf"][1]).to(self.device)
+            self.qf = Critic(venvs, net_archs["qf"][0], net_archs["qf"][1]).to(self.device)
+            self.qf_target = Critic(venvs, net_archs["qf"][0], net_archs["qf"][1]).to(self.device)
 
         # Syncronize the networks (qf_target = qf, pi_target = pi)
         self.pi_target.load_state_dict(self.pi.state_dict())
@@ -195,8 +183,8 @@ class DDPG():
         self.memory = ExperienceBuffer(
                                 self.num_envs,
                                 self.buffer_size,
-                                self.venvs.single_observation_space_shape,
-                                self.venvs.single_action_space_shape,
+                                self.venvs.single_observation_space.shape,
+                                self.venvs.single_action_space.shape,
                                 self.storage_device)      
 
 
@@ -219,7 +207,7 @@ class DDPG():
             self.venvs.close()
 
 
-    def learn(self, total_timesteps: int, log_dir:str = None, project_name: str = None, trial_name: str = None, use_wandb: bool = False, log_frequency: int = 100):
+    def learn(self, total_timesteps: int, log_dir:str = None, project_name: str = None, trial_name: str = None, use_wandb: bool = False, log_frequency: int = 10):
         try:
             log_data = False
             if all(var is not None for var in [log_dir, project_name, trial_name]):  
@@ -232,9 +220,9 @@ class DDPG():
             else:
                 print("Warning: Log is not created.")
 
-
             global_step = 0     # timesteps
             num_updates = 0     # nn update
+            train_loop  = 0     # number of training loops
             should_stop = False
             start_time = time.time()
             #qf_lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(self.qf_optim, max_lr=self.learning_rate, total_steps=total_timesteps)
@@ -243,6 +231,7 @@ class DDPG():
             # ALGO ----------------
             obs, _ = self.venvs.reset(seed=self.seed)
             while global_step < total_timesteps:
+                train_loop += 1
                 # ALGO LOGIC: rollout
                 sampling_start = time.time()
                 for _ in range(self.rollout_steps):
@@ -259,12 +248,11 @@ class DDPG():
                             actions.clamp(self.venvs.single_action_space_low.to(self.device), self.venvs.single_action_space_high.to(self.device))
                             #actions = actions.cpu().numpy().clip(self.venvs.single_action_space.low, self.venvs.single_action_space.high)
                             self.exploration_noise = max(self.exploration_noise -self.exploration_decay_rate, 0.0)
-                    global_step += 1 * self.num_envs
 
                     # Execute the game and log data
                     next_obs, rewards, terminateds, _, infos = self.venvs.step(actions)
 
-                    # Sava data to replay buffer and handle terminal observations
+                    # Save data to replay buffer and handle terminal observations
                     real_next_obs = process_final_observation(next_obs, infos)
                     if 'final_observation' in infos.keys():                        
                         for idx in range(len(infos['dones'])):
@@ -276,6 +264,7 @@ class DDPG():
                     self.memory.store_transitions(self.num_envs, obs, real_next_obs, actions, rewards, terminateds)
 
                     # State transition
+                    global_step += self.num_envs
                     obs = next_obs.clone()
 
                 # ALGO LOGIC: training -------------------------
@@ -325,19 +314,20 @@ class DDPG():
                             #qf_lr_scheduler.step()
                             #pi_lr_scheduler.step()
 
-                        if log_data and (num_updates % log_frequency == 0):
-                            writer.add_scalar("charts/learning_rate_pi", self.pi_optim.param_groups[0]["lr"], global_step)
-                            writer.add_scalar("charts/learning_rate_qf", self.qf_optim.param_groups[0]["lr"], global_step)
-                            writer.add_scalar("charts/exploration_noise", self.exploration_noise, global_step)
-                            writer.add_scalar("losses/qf_loss", qf_loss.mean().item(), global_step)
-                            writer.add_scalar("losses/pi_loss", pi_loss.item(), global_step)
-                            writer.add_scalar("losses/qf1_values_mean", qf_a_values.mean().item(), global_step)
-                            training_time = time.time() - sampling_start
-                            sampling_time = training_start - sampling_start
+                        training_ends = time.time()
+                    if log_data and (train_loop % log_frequency == 0):
+                        writer.add_scalar("charts/learning_rate_pi", self.pi_optim.param_groups[0]["lr"], global_step)
+                        writer.add_scalar("charts/learning_rate_qf", self.qf_optim.param_groups[0]["lr"], global_step)
+                        writer.add_scalar("charts/exploration_noise", self.exploration_noise, global_step)
+                        writer.add_scalar("losses/qf_loss", qf_loss.mean().item(), global_step)
+                        writer.add_scalar("losses/pi_loss", pi_loss.item(), global_step)
+                        writer.add_scalar("accuracy/qf1_values_mean", qf_a_values.mean().item(), global_step)
+                        training_time = training_ends - training_start
+                        sampling_time = training_start - sampling_start
 
-                            writer.add_scalar("perf/training_time", training_time, global_step)
-                            writer.add_scalar("perf/sampling_time", sampling_time, global_step)
-                            writer.add_scalar("perf/DPS", float((global_step) / (time.time() - start_time)), global_step)
+                        writer.add_scalar("perf/training_time", training_time, global_step)
+                        writer.add_scalar("perf/sampling_time", sampling_time, global_step)
+                        writer.add_scalar("perf/DPS", float((global_step) / (time.time() - start_time)), global_step)
 
                 # TODO: implement evaluation and early stopping here!!!
                 

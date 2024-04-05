@@ -126,6 +126,10 @@ class BubbleGPUEnv(ABC):
         raise NotImplementedError
     
     
+    def close(self):
+        print("Environment is closed")
+
+
     @abstractmethod
     def _final_observation_and_reset(self):
         raise NotImplementedError

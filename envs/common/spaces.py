@@ -5,12 +5,22 @@ from typing import Union, Optional
 from abc import ABC, abstractmethod
 import torch
 from enum import Enum
+from dataclasses import dataclass
 
 
 class SpaceType(Enum):
     Discrete = 0    # Discrete set of Actions 
     Box = 1         # Continous 
     Hybrid = 2      # Parametrized Action Space
+
+
+@dataclass
+class SingleSpace:
+    shape: tuple = None
+    n: int = None
+    low: torch.Tensor = None
+    high: torch.Tensor = None
+    dtype: torch.dtype = None
 
 
 class VSpace(ABC):
@@ -80,6 +90,13 @@ class Discrete(VSpace):
         self._single_shape = (1, )
         self._dtype = torch.long
 
+    def single_space(self) -> SingleSpace:
+        space = SingleSpace()
+        space.n = self.n
+        space.dtype = self._dtype
+
+        return space
+
     def sample(self, device: Optional[str] = None) -> torch.Tensor:
         return torch.randint(low=self.start,
                             high=self.n,
@@ -120,7 +137,16 @@ class Box(VSpace):
 
         self._shape = (self.num_envs, self._size)
         self._single_shape = (self._size, )
-     
+
+    def single_space(self) -> SingleSpace:
+        space = SingleSpace()
+        space.shape = self._single_shape
+        space.low = self.low
+        space.high = self.high
+        space.dtype = self.dtype
+        return space
+
+
     def sample(self, device: Optional[str] = None) -> torch.Tensor:
         device = self.device if device == None else device
         return torch.rand(size=self.shape,

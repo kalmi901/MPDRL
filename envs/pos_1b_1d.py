@@ -98,6 +98,9 @@ class Pos1B1D(BubbleGPUEnv):
                                      seed=seed)
         
 
+        self.single_observation_space = self.observation_space.single_space()
+        self.single_action_space = self.action_space.single_space()
+
         self.single_observation_space_shape = self.observation_space.single_shape
         self.single_action_space_shape      = self.action_space.single_shape
         self.single_action_space_low        = self.action_space.low
@@ -123,6 +126,8 @@ class Pos1B1D(BubbleGPUEnv):
         self.actual_action      = self.action_space.sample()
         # Copy positions to device
         self.solver.set_device_array("actual_state", 1, self.actual_observation[:,1].contiguous())
+
+        return self.actual_observation, {}
     
 
     def render(self):
