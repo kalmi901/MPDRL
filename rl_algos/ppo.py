@@ -5,81 +5,36 @@ import torch.optim as optim
 
 import time
 import numpy as np
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 try:
     from .common import RolloutBuffer
     from .common import TFWriter, WandbWriter
-    from .common import build_torch_network
+    from .common import ActorCriticGaussianPolicy
     from .common import process_final_observation
 except:
     from rl_algos.common import RolloutBuffer
     from rl_algos.common import TFWriter, WandbWriter
-    from rl_algos.common import build_torch_network
+    from rl_algos.common import ActorCriticGaussianPolicy
     from rl_algos.common import process_final_observation
-
-
-# Neural Networks ---------------
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
-
-class ActorCriticPolicy(nn.Module):
-    def __init__(self,
-                 venvs: Any,
-                 net_archs: Dict = None,
-                 log_std_max: float = 4.0,
-                 log_std_min: float = -20.0,
-                 log_std_init: float = 1.0) -> None:
-        super().__init__()
-
-        self._log_std_max = log_std_max
-        self._log_std_min = log_std_min
-
-        self._log_std = nn.Parameter(torch.ones(np.prod(venvs.single_action_space.shape)) * log_std_init)
-
-
-        if net_archs == None:
-            # Create NN-s with default
-
-            self.pi =  nn.Sequential(
-                layer_init(nn.Linear(np.array(venvs.single_observation_space.shape).prod(), 256)),
-                nn.ReLU(),
-                layer_init(nn.Linear(256, 256)),
-                nn.ReLU(),
-                layer_init(nn.Linear(256, np.prod(venvs.single_action_space.shape)), std=1),
-            )
-
-            self.vf =  nn.Sequential(
-                layer_init(nn.Linear(np.array(venvs.single_observation_space.shape).prod(), 256)),
-                nn.ReLU(),
-                layer_init(nn.Linear(256, 256)),
-                nn.ReLU(),
-                layer_init(nn.Linear(256, 1)),
-            )
-
-        else:
-            pass
-
-
-    def forward(self, x: torch.Tensor, a: torch.Tensor = None):
-        mean = self.pi(x)
-        log_std = torch.ones_like(mean) * self._log_std.clamp(self._log_std_min, self._log_std_max)
-        std = log_std.exp()
-
-        probs = torch.distributions.Normal(mean, std)
-        if a is None:
-            a = probs.sample()
-
-        return a, probs.log_prob(a).sum(1), probs.entropy().sum(1), self.vf(x)
-        
-  
+         
 
 class PPO():
-    metadata = {"hyperparameters" : ["learning_rate", "gamma"]}
+    metadata = {"hyperparameters" : ["learning_rate", "gamma", "gae_lambda", "mini_batch_size", "clip_coef", "clip_vloss", "ent_coef", "vf_coef", "max_grad_norm",
+                                     "target_kl", "norm_adv", "rollout_steps", "num_update_epochs", "gradient_steps",
+                                      "seed", "torch_deterministic", "cuda", "buffer_device"]}
+
+    default_net_arch = {
+        "hidden_dims": [126, 84],
+        "activations": ["ReLU", "ReLU"],
+        "shared_dims": 0}
+
 
     def __init__(self,
                  venvs: Any,
@@ -99,8 +54,8 @@ class PPO():
                  seed: int = 1,
                  torch_deterministic: bool = True,
                  cuda: bool = True,
-                 storage_device: str = "cuda",
-                 net_archs: Dict = None
+                 buffer_device: str = "cuda",
+                 net_archs: Dict = default_net_arch
                  ) -> None:
         
         # Seeding ------------------------
@@ -128,10 +83,12 @@ class PPO():
         self.num_update_epochs = num_update_epochs
         self.iterations_per_epoch = self.batch_size // self.mini_batch_size + (0 if self.batch_size % self.mini_batch_size == 0 else 1) 
         self.gradient_steps = self.num_update_epochs * self.iterations_per_epoch
-        self.storage_device = storage_device
+        self.buffer_device = buffer_device
 
         # Neural Networks ----------------------
-        self.policy = ActorCriticPolicy(venvs).to(self.device)
+        self.policy = ActorCriticGaussianPolicy(input_dim=np.array(venvs.single_observation_space.shape).prod(),
+                                                output_dim=np.prod(venvs.single_action_space.shape),
+                                                **net_archs).to(self.device)
 
         # Optimizer
         self.optimizer = optim.AdamW(self.policy.parameters(), lr=self.learning_rate, eps=1e-5)
@@ -141,7 +98,7 @@ class PPO():
                                     self.rollout_steps,
                                     self.venvs.single_observation_space.shape,
                                     self.venvs.single_action_space.shape,
-                                    self.storage_device)
+                                    self.buffer_device)
 
 
     def learn(self, total_timesteps: int, log_dir:str = None, project_name: str = None, trial_name: str = None, use_wandb: bool = False, log_frequency: int = 10):
@@ -166,6 +123,7 @@ class PPO():
             obs, _ = self.venvs.reset(seed=self.seed)
             dones = torch.zeros(self.num_envs, device=self.device)
             while global_step < total_timesteps:
+                train_loop += 1
                 # ALGO LOGIC: rollout
                 sampling_start = time.time()
                 for step in range(self.rollout_steps):
@@ -188,7 +146,7 @@ class PPO():
                     # Handle time-out --> add future value for the reward
                     idx = torch.where(time_outs)[0]
                     with torch.no_grad():
-                        real_next_values = self.policy.vf(real_next_obs).view(-1)
+                        real_next_values = self.policy.value(real_next_obs).view(-1)
                         if len(idx) > 0:
                             rewards[idx] += (self.gamma * real_next_values[idx])
 

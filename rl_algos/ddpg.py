@@ -5,93 +5,21 @@ import torch.optim as optim
 
 import time
 import numpy as np
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 
 try:
     from .common import ExperienceBuffer
     from .common import TFWriter, WandbWriter
-    from .common import build_torch_network
+    from .common import ActorDeterministic as Actor
+    from .common import Critic
     from .common import process_final_observation
 except: 
     from rl_algos.common import ExperienceBuffer
     from rl_algos.common import TFWriter, WandbWriter
-    from rl_algos.common import build_torch_network
+    from rl_algos.common import ActorDeterministic as Actor
+    from rl_algos.common import Critic
     from rl_algos.common import process_final_observation
-
-
-# Neural Networks ----------
-class Critic(nn.Module):
-    def __init__(self, 
-                 venvs: Any,
-                 fc_dims: List[int] = None,
-                 fc_acts: List[str] = None) -> None:
-        super().__init__()
-
-        if (fc_dims is not None and
-            fc_acts is not None and 
-            len(fc_dims) == len(fc_acts)):
-            print("Critic is created with custom parameters")
-            self.qf = build_torch_network(input_dim=np.array(venvs.single_observation_space.shape).prod() \
-                                                   +np.prod(venvs.single_action_space.shape),
-                                          output_dim=1,
-                                          fc_dims=fc_dims,
-                                          fc_acts=fc_acts)
-
-        else:
-            print("Critic is created with default parameters")
-            self.qf = nn.Sequential(
-                nn.Linear(np.array(venvs.single_observation_space.shape).prod() + np.prod(venvs.single_action_space.shape), 256),
-                nn.ReLU(),
-                nn.Linear(256, 256),
-                nn.ReLU(),
-                nn.Linear(256, 1)
-            )
-
-    def forward(self, x:torch.Tensor, a:torch.Tensor):
-        return self.qf(torch.cat([x, a], 1))
-
-
-class Actor(nn.Module):
-    def __init__(self,
-                 venvs: Any,
-                 fc_dims: List[int] = None,
-                 fc_acts: List[str] = None) -> None:
-        super().__init__()
-
-        if(fc_dims is not None and
-           fc_acts is not None and
-           len(fc_dims) == len(fc_acts)):
-            print("Actor is created with custom parameters")
-            self.pi = build_torch_network(input_dim=np.array(venvs.single_observation_space.shape).prod(),
-                                          output_dim=np.prod(venvs.single_action_space.shape),
-                                          fc_dims=fc_dims,
-                                          fc_acts=fc_acts,
-                                          last_act="Tanh")
-
-        else:
-            print("Actor is created with default parameters")
-            self.pi =  nn.Sequential(
-                nn.Linear(np.array(venvs.single_observation_space.shape).prod(), 256),
-                nn.ReLU(),
-                nn.Linear(256, 256),
-                nn.ReLU(),
-                nn.Linear(256, np.prod(venvs.single_action_space.shape)),
-                nn.Tanh()
-            )
-
-        self.register_buffer(
-            "action_scale", 
-            torch.tensor((venvs.single_action_space.high - venvs.single_action_space.low) / 2.0 )
-            )
-        
-        self.register_buffer(
-            "action_bias",
-            torch.tensor((venvs.single_action_space.high + venvs.single_action_space.low) / 2.0)
-            )
-        
-    def forward(self, x: torch.Tensor):
-        return self.pi(x) * self.action_scale + self.action_bias 
 
 
 
@@ -101,6 +29,14 @@ class DDPG():
                                     "policy_frequency", "rollout_steps", "gradient_steps", "num_envs",
                                     "noise_clip", "seed", "torch_determnistic", "cuda", "storage_device"]}
 
+    default_net_arch = {
+        "pi": {
+            "hidden_dims": [256, 256],
+            "activations": ["ReLU", "ReLU"] },
+        "qf": {
+            "hidden_dims": [256, 256],
+            "activations": ["ReLU", "ReLU"] }}
+    
     def __init__(self,
                  venvs: Any,
                  learning_rate: float = 3e-4,
@@ -119,7 +55,7 @@ class DDPG():
                  torch_deterministic: bool = True,
                  cuda: bool = True,
                  storage_device: str= "cpu",
-                 net_archs: Dict = None
+                 net_archs: Dict = default_net_arch
                  ) -> None:
          
         # Seeding ------------------------------------
@@ -146,22 +82,35 @@ class DDPG():
         self.storage_device = storage_device
 
         # Neural networks ---------------------------------
-        if net_archs is None:
-            # Actor Network (Policy)
-            self.pi = Actor(venvs).to(self.device)
-            self.pi_target = Actor(venvs).to(self.device)
+        self.pi = Actor(
+            input_dim=np.array(venvs.single_observation_space.shape).prod(),
+            output_dim=np.prod(venvs.single_action_space.shape),
+            activations=net_archs["pi"]["activations"],
+            hidden_dims=net_archs["pi"]["hidden_dims"],
+            action_high=torch.tensor(venvs.single_action_space.high),
+            action_low=torch.tensor(venvs.single_action_space.low)).to(self.device)
+        
+        self.pi_target = Actor(
+            input_dim=np.array(venvs.single_observation_space.shape).prod(),
+            output_dim=np.prod(venvs.single_action_space.shape),
+            activations=net_archs["pi"]["activations"],
+            hidden_dims=net_archs["pi"]["hidden_dims"],
+            action_high=torch.tensor(venvs.single_action_space.high),
+            action_low=torch.tensor(venvs.single_action_space.low)).to(self.device)
 
-            # Critic Network (Action-Value Function)
-            self.qf = Critic(venvs).to(self.device)
-            self.qf_target = Critic(venvs).to(self.device)
-        elif net_archs is not None:
-            # Actor Network (Policy)
-            self.pi = Actor(venvs, net_archs["pi"][0], net_archs["pi"][1]).to(self.device)
-            self.pi_target = Actor(venvs, net_archs["pi"][0], net_archs["pi"][1]).to(self.device)
-
-            # Critic Network (Action-Value Function)
-            self.qf = Critic(venvs, net_archs["qf"][0], net_archs["qf"][1]).to(self.device)
-            self.qf_target = Critic(venvs, net_archs["qf"][0], net_archs["qf"][1]).to(self.device)
+        self.qf = Critic(
+            input_dim=np.array(venvs.single_observation_space.shape).prod() \
+                    +np.prod(venvs.single_action_space.shape),
+            output_dim=1,
+            activations=net_archs["qf"]["activations"],
+            hidden_dims=net_archs["qf"]["hidden_dims"]).to(self.device)
+        
+        self.qf_target = Critic(
+            input_dim=np.array(venvs.single_observation_space.shape).prod() \
+                    +np.prod(venvs.single_action_space.shape),
+            output_dim=1,
+            activations=net_archs["qf"]["activations"],
+            hidden_dims=net_archs["qf"]["hidden_dims"]).to(self.device)
 
         # Syncronize the networks (qf_target = qf, pi_target = pi)
         self.pi_target.load_state_dict(self.pi.state_dict())
@@ -268,8 +217,8 @@ class DDPG():
                     obs = next_obs.clone()
 
                 # ALGO LOGIC: training -------------------------
-                training_start = time.time()
                 if global_step > self.learning_starts:
+                    training_start = time.time()
                     for _ in range(self.gradient_steps):
                         num_updates += 1
                         # Get sample from the memory
@@ -314,14 +263,14 @@ class DDPG():
                             #qf_lr_scheduler.step()
                             #pi_lr_scheduler.step()
 
-                        training_ends = time.time()
+                    training_ends = time.time()
                     if log_data and (train_loop % log_frequency == 0):
                         writer.add_scalar("charts/learning_rate_pi", self.pi_optim.param_groups[0]["lr"], global_step)
                         writer.add_scalar("charts/learning_rate_qf", self.qf_optim.param_groups[0]["lr"], global_step)
                         writer.add_scalar("charts/exploration_noise", self.exploration_noise, global_step)
                         writer.add_scalar("losses/qf_loss", qf_loss.mean().item(), global_step)
                         writer.add_scalar("losses/pi_loss", pi_loss.item(), global_step)
-                        writer.add_scalar("accuracy/qf1_values_mean", qf_a_values.mean().item(), global_step)
+                        writer.add_scalar("accuracy/qf_values_mean", qf_a_values.mean().item(), global_step)
                         training_time = training_ends - training_start
                         sampling_time = training_start - sampling_start
 

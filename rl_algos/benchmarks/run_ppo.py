@@ -60,8 +60,6 @@ def parse_args():
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
 
-    
-
     args = parser.parse_args()
     return args
 

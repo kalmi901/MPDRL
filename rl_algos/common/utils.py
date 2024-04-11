@@ -10,44 +10,6 @@ except:
 
 from typing import Dict, Any
 
-def build_torch_network(input_dim,
-                        output_dim, 
-                        fc_dims, 
-                        fc_acts,
-                        last_act=None) -> nn.Sequential:
-    full_dims = [input_dim] + fc_dims + [output_dim]
-    num_layers = len(full_dims)
-    layers = []
-    # Input + Hidden layers
-    for i in range(num_layers-2):
-        layers.append(
-            nn.Linear(full_dims[i], full_dims[i+1])
-        )
-        if fc_acts[i] == "ReLU":
-            layers.append(nn.ReLU())
-        elif fc_acts[i] == "Tanh":
-            layers.append(nn.Tanh())
-        elif fc_acts[i] == "LeakyReLU":
-            layers.append(nn.LeakyReLU())
-
-
-    # Output Layer --- 
-    layers.append(
-        nn.Linear(full_dims[-2], full_dims[-1])
-    )
-
-    # Activation Function of Last Layers
-    # TODO: Sigmoid?
-    if last_act is not None:
-        if last_act == "ReLU":
-            layers.append(nn.ReLU())
-        elif last_act == "Tanh":
-            layers.append(nn.Tanh())
-
-
-    return nn.Sequential(*layers)
-
-
 def process_final_observation(next_obs: torch.Tensor, infos: Dict):
     real_next_obs = next_obs.clone()
     if 'final_observation' in infos.keys():
