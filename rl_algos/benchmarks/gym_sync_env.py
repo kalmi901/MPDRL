@@ -20,17 +20,17 @@ class ModifiedSyncVectorEnv(SyncVectorEnv):
 
 
         if action_space_type == "Box":
-            self.single_action_space_shape       = self.single_action_space.shape
-            self.single_action_space_low         = torch.tensor(self.single_action_space.low)
-            self.single_action_space_high        = torch.tensor(self.single_action_space.high)
+            #self.single_action_space.shape       = self.single_action_space.shape
+            self.single_action_space.low         = torch.tensor(self.single_action_space.low)
+            self.single_action_space.high        = torch.tensor(self.single_action_space.high)
 
         if action_space_type == "Discre":
-            self.single_action_space_shape       = (1, )
-            self.single_action_space_shape       = torch.tensor(self.single_action_space)
+            self.single_action_space.shape       = (1, )
+            self.single_action_space.shape       = torch.tensor(self.single_action_space)
 
         if observation_space_type == "Box":
-            self.single_observation_space_shape  = self.single_observation_space.shape
-
+            #self.single_observation_space.shape  = self.single_observation_space.shape
+            pass
 
     def reset(self, seed: int = None):
         return torch.tensor(super().reset(seed=seed)[0], device="cuda"), {}

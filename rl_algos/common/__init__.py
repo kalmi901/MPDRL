@@ -5,7 +5,7 @@ from .utils import TFWriter
 from .utils import WandbWriter
 
 from .utils import process_final_observation
-
+from .utils import save_model, load_model
 
 from .policies import ActorCriticGaussianPolicy
 

@@ -82,21 +82,24 @@ class DDPG():
         self.storage_device = storage_device
 
         # Neural networks ---------------------------------
+        action_high = venvs.single_action_space.high if isinstance(venvs.single_action_space.high, torch.Tensor) else torch.tensor(venvs.single_action_space.high)
+        action_low  = venvs.single_action_space.low  if isinstance(venvs.single_action_space.low , torch.Tensor) else torch.tensor(venvs.single_action_space.low)
+
         self.pi = Actor(
             input_dim=np.array(venvs.single_observation_space.shape).prod(),
             output_dim=np.prod(venvs.single_action_space.shape),
             activations=net_archs["pi"]["activations"],
             hidden_dims=net_archs["pi"]["hidden_dims"],
-            action_high=torch.tensor(venvs.single_action_space.high),
-            action_low=torch.tensor(venvs.single_action_space.low)).to(self.device)
+            action_high=action_high,
+            action_low=action_low).to(self.device)
         
         self.pi_target = Actor(
             input_dim=np.array(venvs.single_observation_space.shape).prod(),
             output_dim=np.prod(venvs.single_action_space.shape),
             activations=net_archs["pi"]["activations"],
             hidden_dims=net_archs["pi"]["hidden_dims"],
-            action_high=torch.tensor(venvs.single_action_space.high),
-            action_low=torch.tensor(venvs.single_action_space.low)).to(self.device)
+            action_high=action_high,
+            action_low=action_low).to(self.device)
 
         self.qf = Critic(
             input_dim=np.array(venvs.single_observation_space.shape).prod() \
@@ -137,6 +140,18 @@ class DDPG():
                                 self.storage_device)      
 
 
+    def save_model(self, save_fname: str):
+        torch.save(self.pi.state_dict(), save_fname+"_actor.th")
+        torch.save(self.qf.state_dict(), save_fname+"_critic.th")
+
+    def load_model(self, load_fname: str):
+        # TODO: Handle exceptions
+        loaded_actor_state_dict = torch.load(load_fname+"_actor.th")
+        loaded_critic_state_dict = torch.load(load_fname+"_critic.th")
+        self.pi.load_state_dict(loaded_actor_state_dict)
+        self.pi_target.load_state_dict(loaded_actor_state_dict)
+        self.qf.load_state_dict(loaded_critic_state_dict)
+        self.qf_target.load_state_dict(loaded_critic_state_dict)
 
     def predict(self, total_timesteps: int):
         try:
@@ -193,11 +208,10 @@ class DDPG():
                         with torch.no_grad():
                             #actions = self.pi(torch.tensor(obs).to(self.device))
                             actions = self.pi(obs)
-                            actions += torch.normal(0, self.pi.action_scale * self.exploration_noise)
-                            actions.clamp(self.venvs.single_action_space_low.to(self.device), self.venvs.single_action_space_high.to(self.device))
+                            actions += torch.normal(0, self.pi.action_scale * self.exploration_noise).clamp(-self.noise_clip, self.noise_clip)
+                            actions = torch.clamp(actions, self.venvs.single_action_space.low.to(self.device), self.venvs.single_action_space.high.to(self.device))
                             #actions = actions.cpu().numpy().clip(self.venvs.single_action_space.low, self.venvs.single_action_space.high)
                             self.exploration_noise = max(self.exploration_noise -self.exploration_decay_rate, 0.0)
-
                     # Execute the game and log data
                     next_obs, rewards, terminateds, _, infos = self.venvs.step(actions)
 
@@ -264,7 +278,7 @@ class DDPG():
                             #pi_lr_scheduler.step()
 
                     training_ends = time.time()
-                    if log_data and (train_loop % log_frequency == 0):
+                    if log_data and (train_loop % log_frequency == 0) and (num_updates > self.policy_frequency):
                         writer.add_scalar("charts/learning_rate_pi", self.pi_optim.param_groups[0]["lr"], global_step)
                         writer.add_scalar("charts/learning_rate_qf", self.qf_optim.param_groups[0]["lr"], global_step)
                         writer.add_scalar("charts/exploration_noise", self.exploration_noise, global_step)

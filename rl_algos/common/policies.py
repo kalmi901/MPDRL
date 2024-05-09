@@ -71,7 +71,7 @@ class ActorCriticDeterministicPolicy(nn.Module):
                  activations: List[str], 
                  hidden_dims: List[int],
                  action_high: torch.Tensor,
-                 action_low: torch.Tensor,
+                 action_low : torch.Tensor,
                  shared_dims: int = 0,
                  **kwargs)-> None:
         super().__init__()
@@ -115,7 +115,7 @@ class ActorDeterministic(nn.Module):
                  activations: List[str],
                  hidden_dims: List[int],
                  action_high: torch.Tensor,
-                 action_low,
+                 action_low : torch.Tensor,
                  **kwargs) -> None:
         super().__init__()
 

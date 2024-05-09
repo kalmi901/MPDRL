@@ -17,12 +17,18 @@ def process_final_observation(next_obs: torch.Tensor, infos: Dict):
 
     return real_next_obs
 
+def save_model(model: nn.Module, path: str, fname: str):
+    torch.save(model.state_dict(), os.path.join(path, fname))
+
+def load_model(model: nn.Module, path:str, fname: str):
+    model.load_state_dict(torch.load(os.path.join(path, fname)))
+
 
 class TFWriter(SummaryWriter):
     def __init__(self, log_dir: str, project_name: str, run_name: str, model: Any):
-        super().__init__(os.path.join(log_dir, "runs", run_name))
+        super().__init__(os.path.join(log_dir, run_name))
 
-        if not hasattr(model, "metadata"):
+        if hasattr(model, "metadata"):
             self.add_text(
                 "hyperparameters",
                 "|param|value|\n|-|-|\n%s" % ("\n".join(str(f"|{param}|{getattr(model, param)}|") for param in model.metadata["hyperparameters"] if hasattr(model, param)))
@@ -31,7 +37,7 @@ class TFWriter(SummaryWriter):
 
 class WandbWriter(SummaryWriter):
     def __init__(self, log_dir: str, project_name: str, run_name: str, model: Any):
-        super().__init__(os.path.join(log_dir, "runs", run_name))
+        super().__init__(os.path.join(log_dir, run_name))
 
         try:
             entity = os.environ["WANDB_USER"]

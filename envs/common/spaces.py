@@ -42,6 +42,9 @@ class VSpace(ABC):
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
+    def scale(self):
+        raise NotImplementedError
+
     @abstractmethod
     def sample(self) -> torch.Tensor:
         raise NotImplementedError
@@ -137,6 +140,8 @@ class Box(VSpace):
 
         self._shape = (self.num_envs, self._size)
         self._single_shape = (self._size, )
+        self._scale = (self.high - self.low) / 2.0 
+        self._bias  = (self.high + self.low) / 2.0
 
     def single_space(self) -> SingleSpace:
         space = SingleSpace()
@@ -153,6 +158,12 @@ class Box(VSpace):
                         dtype=self._dtype,
                         device=device) \
                 * (self.high - self.low).to(device) + self.low.to(device)
+    
+    def scale(self, x: torch.Tensor) -> torch.Tensor:
+        return (x  - self._bias.to(x.device)) / self._scale.to(x.device) 
+    
+    def normalize(self, x:torch.Tensor) -> torch.Tensor:
+        return x / self.high.to(x.device)
         
 
 
