@@ -35,14 +35,14 @@ class RolloutBuffer():
                          dones: torch.Tensor):
         
         if step > self.buffer_size:
-            raise IndexError (" some error message here  ")
+            raise IndexError("Step must be less than buffer size.")
         
-        self.observations[step] = observations.to(self.device)
-        self.actions[step]      = actions.to(self.device)
-        self.logprobs[step]     = logprobs.to(self.device)
-        self.rewards[step]      = rewards.to(self.device)
-        self.values[step]       = values.to(self.device)
-        self.dones[step]        = dones.to(self.device)
+        self.observations[step] = observations
+        self.actions[step]      = actions
+        self.logprobs[step]     = logprobs
+        self.rewards[step]      = rewards
+        self.values[step]       = values
+        self.dones[step]        = dones
 
     def compute_gae_estimate(self, last_values: torch.Tensor, last_dones: torch.Tensor,  gamma: float, gae_lambda: float):
 
@@ -52,8 +52,8 @@ class RolloutBuffer():
                 nextnonterminal = 1.0 - last_dones.to(dtype=self.dtype, device=self.device)
                 nextvalues = last_values.to(self.device)
             else:
-                nextnonterminal = 1.0 - self.dones[t + 1]
-                nextvalues = self.values[t + 1]
+                nextnonterminal = 1.0 - self.dones[t + 1] if t < self.buffer_size - 1 else 0
+                nextvalues = self.values[t + 1] if t < self.buffer_size - 1 else 0
             
             delta = self.rewards[t] + gamma * nextvalues * nextnonterminal - self.values[t]
             self.advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam

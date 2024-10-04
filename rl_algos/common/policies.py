@@ -5,6 +5,59 @@ from typing import List, Union
 
 ACTIVATIONS = ["ReLU", "Tanh", "lReLU"]
 
+
+class ActorCriticBetaPolicy(nn.Module):
+    def __init__(self,
+                 input_dim: int,
+                 output_dim: int,
+                 activations: List[str],
+                 hidden_dims: List[str],
+                 action_high: torch.Tensor,
+                 action_low : torch.Tensor,
+                 shared_dims: int = 0,
+                 **kwargs) -> None:
+        super().__init__()
+
+        self.register_buffer("action_scale", (action_high - action_low) )
+        self.register_buffer("action_bias",  action_low)
+
+        dims = [input_dim] + hidden_dims + [2*output_dim]
+        acts = activations + [None]
+
+        if shared_dims == 0:
+            self.features = nn.Identity()
+        else:
+            s_dims = dims[0:shared_dims+1]
+            s_acts = acts[0:shared_dims]
+            self.features = build_network(s_dims, s_acts)
+
+        self.pi = build_network(dims[shared_dims:], acts[shared_dims:])             # Policy
+        self.vf = build_network(dims[shared_dims:-1]+[1], acts[shared_dims:])       # Value Function
+
+    def value(self, x: torch.Tensor) -> torch.Tensor:
+        return self.vf(self.features(x))
+    
+
+    def forward(self, x: torch.Tensor, a: Union[torch.Tensor, None] = None):
+        f = self.features(x)
+        params = self.pi(f)
+
+        alpha, beta = torch.chunk(params, 2, dim=-1)
+
+        alpha = torch.nn.functional.softplus(alpha) + 1e-3  # Avoid instabilities
+        beta = torch.nn.functional.softplus(beta)   + 1e-3
+
+        # Beta distribution
+        probs = torch.distributions.Beta(alpha, beta)
+        
+        if a is None:
+            a_unscaled = probs.sample()
+        else:
+            a_unscaled = (a - self.action_bias) / self.action_scale
+
+        return a_unscaled *  self.action_scale +  self.action_bias, probs.log_prob(a_unscaled).sum(dim=-1), probs.entropy().sum(dim=-1), self.vf(f)
+
+
 # Combined Modules with optinal shared feature extraction 
 class ActorCriticGaussianPolicy(nn.Module):
     def __init__(self,
@@ -12,16 +65,21 @@ class ActorCriticGaussianPolicy(nn.Module):
                  output_dim: int,
                  activations: List[str], 
                  hidden_dims: List[int],
+                 action_high: torch.Tensor,
+                 action_low : torch.Tensor,
                  shared_dims: int = 0,
-                 log_std_max: float = 4.0,
+                 log_std_max: float = -0.5,
                  log_std_min: float = -20.0,
-                 log_std_init: float = 1.0,
+                 log_std_init: float = -0.1,
                  **kwargs) -> None:
         super().__init__()
 
         self._log_std_max = log_std_max
         self._log_std_min = log_std_min
-        self._log_std = nn.Parameter(torch.ones(output_dim) * log_std_init)
+        self._log_std = nn.Parameter(torch.ones(output_dim) * log_std_init, requires_grad=True)
+
+        self.register_buffer("action_high", action_high)
+        self.register_buffer("action_low",  action_low)
 
         dims = [input_dim] + hidden_dims + [output_dim]
         acts = activations + [None]     # Last Activation
@@ -49,7 +107,7 @@ class ActorCriticGaussianPolicy(nn.Module):
         log_std = torch.ones_like(mean) * self._log_std.clamp(self._log_std_min, self._log_std_max)
         std = log_std.exp()
 
-        return  torch.distributions.Normal(mean, std).sample()
+        return  torch.distributions.Normal(mean, std).sample().clamp(self.action_low, self.action_high)
 
 
     def forward(self, x: torch.Tensor, a: Union[torch.Tensor, None] = None):
@@ -62,7 +120,7 @@ class ActorCriticGaussianPolicy(nn.Module):
         if a is None:
             a = probs.sample()
 
-        return a, probs.log_prob(a).sum(1), probs.entropy().sum(1), self.vf(f)
+        return a.clamp(self.action_low, self.action_high), probs.log_prob(a).sum(1), probs.entropy().sum(1), self.vf(f)
 
 class ActorCriticDeterministicPolicy(nn.Module):
     def __init__(self,

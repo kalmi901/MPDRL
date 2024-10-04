@@ -10,12 +10,12 @@ from typing import Dict, Any
 try:
     from .common import RolloutBuffer
     from .common import TFWriter, WandbWriter
-    from .common import ActorCriticGaussianPolicy
+    from .common import ActorCriticGaussianPolicy, ActorCriticBetaPolicy
     from .common import process_final_observation
 except:
     from rl_algos.common import RolloutBuffer
     from rl_algos.common import TFWriter, WandbWriter
-    from rl_algos.common import ActorCriticGaussianPolicy
+    from rl_algos.common import ActorCriticGaussianPolicy, ActorCriticBetaPolicy
     from rl_algos.common import process_final_observation
 
 
@@ -86,12 +86,22 @@ class PPO():
         self.buffer_device = buffer_device
 
         # Neural Networks ----------------------
-        self.policy = ActorCriticGaussianPolicy(input_dim=np.array(venvs.single_observation_space.shape).prod(),
-                                                output_dim=np.prod(venvs.single_action_space.shape),
-                                                **net_archs).to(self.device)
+
+        action_high = venvs.single_action_space.high if isinstance(venvs.single_action_space.high, torch.Tensor) else torch.tensor(venvs.single_action_space.high)
+        action_low  = venvs.single_action_space.low  if isinstance(venvs.single_action_space.low , torch.Tensor) else torch.tensor(venvs.single_action_space.low)
+
+        self.policy = ActorCriticBetaPolicy(
+            input_dim=np.array(venvs.single_observation_space.shape).prod(),
+            output_dim=np.prod(venvs.single_action_space.shape),
+            action_high=action_high,
+            action_low=action_low,
+            **net_archs).to(self.device)
 
         # Optimizer
-        self.optimizer = optim.AdamW(self.policy.parameters(), lr=self.learning_rate, eps=1e-5)
+        self.optimizer = optim.AdamW(self.policy.parameters(), lr=self.learning_rate)
+
+        print("-----Policy-----")
+        print(self.policy)
 
         # Rollout buffer -----------------------
         self.memory = RolloutBuffer(self.num_envs,
@@ -129,7 +139,8 @@ class PPO():
                 for step in range(self.rollout_steps):
                     with torch.no_grad():
                         actions, logprobs, _, values = self.policy(obs)
-                        actions.clamp(self.venvs.single_action_space_low.to(self.device), self.venvs.single_action_space_high.to(self.device))
+                        #print(actions)
+                        #input()
 
                     # Execute the game and log data
                     next_obs, rewards, terminateds, time_outs, infos = self.venvs.step(actions)
@@ -236,7 +247,7 @@ class PPO():
                 training_ends = time.time()
                 # Calculate the explaine variance
                 y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
-                var_y = np.var(y_true)
+                var_y = np.var(y_true) + 1.0e-12
                 explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
 
