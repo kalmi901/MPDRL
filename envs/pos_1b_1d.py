@@ -118,7 +118,7 @@ class Pos1B1D(BubbleGPUEnv):
         elif type(self.initial_position) in [float, int]:
             bubble_positions = torch.full(size=(self.num_envs,), fill_value=self.initial_position, dtype=torch.float32, device="cuda").contiguous()
         else:
-            print("Err: initial bubble position is created!")
+            print("Err: initial bubble position is not created!")
  
         if "X" in self.observed_variables.keys():
             for _ in range(self.observed_variables["X"]["len"]):

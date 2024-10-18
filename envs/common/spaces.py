@@ -113,7 +113,7 @@ class Box(VSpace):
                  high: Union[float, torch.Tensor[torch.float]],
                  size: int = 1,
                  num_envs: int = 1,
-                 dtype : Union[torch.float32, torch.float64] = None,
+                 dtype : Optional[torch.dtype] = None,
                  seed: int  = None
                  ) -> None:
         super().__init__(SpaceType.Box, num_envs=num_envs, seed=seed)
