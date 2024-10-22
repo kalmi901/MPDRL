@@ -117,6 +117,9 @@ def per_thread_ode_function(tid, t, dx, x, acc, cp, dp, sp):
     s  = cuda.local.array((2, ), dtype=nb.float64)
     b = cuda.local.array((4, ),  dtype=nb.float64)
     A = cuda.local.array((4, 4), dtype=nb.float64)
+    for i in range(4):
+        for j in range(4):
+            A[i,j] = 0.0
 
     s[0] = 1.0
     s[1] =-1.0
@@ -178,15 +181,13 @@ def per_thread_ode_function(tid, t, dx, x, acc, cp, dp, sp):
         for j in range(i + 1, 4):
             c = -A[j,i] / A[i,i]
             b[j] += c * b[i]
-            for k in range(4):
-                if (k == i):
-                    A[j,k] = 0.0
-                else:
-                    A[j,k] += c * A[i,k]
+            A[j,i] = 0.0
+            for k in range(i+1,4):
+                A[j,k] += c * A[i,k]
 
     # Backward substitution
     y = cuda.local.array((4, ), dtype=nb.float64)
-    for i in range(4-1, -1, -1):
+    for i in range(3, -1, -1):
         y[i] = b[i] / A[i,i]
         for j in range(i-1, -1, -1):
             b[j] -= A[j,i] * y[i]
@@ -213,7 +214,7 @@ def per_thread_finalization(tid, t, td, x, acc, cp, dp, sp):
 def per_thread_event_function(tid, t, ev, x, acc, cp, dp, sp):
     # Collision (Radius overlaps, 1.25 safety threshold to avoid numerical errors.  )
     ev[0] = (x[0]*cp[15] + x[1]*cp[31])*1.5  - abs(x[3] - x[2])
-    print(ev[0])
+    #print(ev[0])
 
 @cuda.jit(nb.boolean(nb.int32, nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
 def per_thread_action_after_event_detection(tid, idx, t, td, x, acc, cp, dp, sp):

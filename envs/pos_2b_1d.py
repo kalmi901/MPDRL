@@ -103,9 +103,12 @@ class Pos2B1D(BubbleGPUEnv):
             number_of_shared_parameters=SOLVER_OPTS["NSP"],
             number_of_dynamic_parameters=SOLVER_OPTS["NDP"] * EQ_PROPS["k"],
             number_of_accessories=SOLVER_OPTS["NACC"],
+            number_of_events=SOLVER_OPTS["NE"],
             method=SOLVER_OPTS["SOLVER"],
             abs_tol=SOLVER_OPTS["ATOL"],
-            rel_tol=SOLVER_OPTS["RTOL"]
+            rel_tol=SOLVER_OPTS["RTOL"],
+            event_tol=SOLVER_OPTS["ETOL"],
+            event_dir=SOLVER_OPTS["EDIR"]
         )
 
         self.single_observation_space = self.observation_space.single_space()
@@ -258,8 +261,8 @@ class Pos2B1D(BubbleGPUEnv):
             self.solver.set_device(tid, "actual_state", 6, 0.0)
             self.solver.set_device(tid, "actual_state", 7, 0.0)
 
-        self.algo_steps[tid] = 0
-        self.total_rewards[tid] = 0.0
+            self.algo_steps[tid] = 0
+            self.total_rewards[tid] = 0.0
 
         self.solver.syncronize()
         self._get_observation()
@@ -360,7 +363,7 @@ class Pos2B1D(BubbleGPUEnv):
         return 0.5 * (self.observed_variables["X_1"]["values"][0] + self.observed_variables["X_0"]["values"][0])
 
     def distance(self):
-        return torch.abs(self.observed_variables["X_1"]["values"][0] - self.observed_variables["X_1"]["values"][0])
+        return torch.abs(self.observed_variables["X_1"]["values"][0] - self.observed_variables["X_0"]["values"][0])
 
 
     # ------------- Environment's private methods -----------------
@@ -368,10 +371,14 @@ class Pos2B1D(BubbleGPUEnv):
         
         max_distance    = self.observation_space_dict.XT["MAX"][0] - self.observation_space_dict.XT["MIN"][0] 
         target_distance = torch.abs(self.mean_positions() - self.target_positions())
-
-        #distance_error  = torch.max()
+        bubble_distance = self.distance()
+        pa_idx = self.action_space_dict.PA["IDX"]
+        intesity = torch.sum(self._actions[:, pa_idx], axis=1)**0.5
 
         self._rewards = - self.w[0] * (target_distance / max_distance)**self.b   \
+                        - self.w[1] * (  torch.max(torch.tensor(0), self.min_distance - bubble_distance)
+                                       + torch.max(torch.tensor(0), bubble_distance - self.max_distance) ) \
+                        - self.w[2] * intesity \
                         +self.negative_terminal_reward * self._negative_terminal \
                         +self.positive_terminal_reward * self._positive_terminal
 
@@ -383,6 +390,8 @@ class Pos2B1D(BubbleGPUEnv):
 
         if self.apply_termination:
             self._positive_terminal = abs(self.mean_positions() - self.target_positions()) < self.position_tolerance
+        else:
+            self._positive_terminal = torch.full_like(self._negative_terminal, False)
 
         self._time_out = (self.algo_steps == self.episode_length)
 

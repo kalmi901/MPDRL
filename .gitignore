@@ -33,3 +33,12 @@ simulations/single_bubble_position_control/wandb
 simulations/single_bubble_position_control/wandb/*
 simulations/single_bubble_position_control/models
 simulations/single_bubble_position_control/models/*
+simulations/dual_bubble_position_control/__pycache__
+simulations/dual_bubble_position_control/__pycache__/*
+simulations/dual_bubble_position_control/runs
+simulations/dual_bubble_position_control/runs/*
+simulations/dual_bubble_position_control/wandb
+simulations/dual_bubble_position_control/wandb/*
+simulations/dual_bubble_position_control/models
+simulations/dual_bubble_position_control/models/*
+

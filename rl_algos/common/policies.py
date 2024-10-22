@@ -44,8 +44,8 @@ class ActorCriticBetaPolicy(nn.Module):
 
         alpha, beta = torch.chunk(params, 2, dim=-1)
 
-        alpha = torch.nn.functional.softplus(alpha) + 1e-3  # Avoid instabilities
-        beta = torch.nn.functional.softplus(beta)   + 1e-3
+        alpha = torch.nn.functional.softplus(alpha) + 1e-9  # Avoid instabilities
+        beta = torch.nn.functional.softplus(beta)   + 1e-9
 
         # Beta distribution
         probs = torch.distributions.Beta(alpha, beta)
