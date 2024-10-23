@@ -112,7 +112,94 @@ def setup(ac_field, k):
 
     elif ac_field == "SW_A":
         """Standing Wave with ANTINODE located at x = 0"""
-        pass
+        
+        @nb.njit(__AC_FUN_SIG, inline='always')
+        def _PA(t, x, sp, dp):
+            """
+            Excitation Pressure \n
+            Arguments: \n
+                t (nb.float64)      - Dimensionless time
+                x (nb.float64[:])   - Dimensionless position of the bubble
+                sp(nb.float64[:])   - Static constants
+                dp(nb.float64[:])   - Dynamic constants
+
+            Returns: \n
+                p (nb.float64[:])   - Pressure amplitude
+            """
+
+            p = np.zeros_like(x)
+            for i in range(k):
+                p += dp[i]  * np.cos(2*np.pi*sp[2]*dp[3*k + i] * x + dp[2*k + i]) \
+                            * np.sin(2*np.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+
+            return p
+
+        @nb.njit(__AC_FUN_SIG, inline='always')
+        def _PAT(t, x, sp, dp):
+            """
+            The time derivative of the excitation pressure \n
+            Arguments: \n
+                t (nb.float64)      - Dimensionless time
+                x (nb.float64[:])   - Dimensionless postion of the bubble
+                sp(nb.float64[:])   - Static constants
+                dp(nb.float64[:])   - Dynamic constants
+
+            Returns: \n
+                pt(nb.float64[:])    - time derivative of pressure amplitude
+            """
+
+            pt = np.zeros_like(x)
+            for i in range(k):
+                pt+= dp[i] * dp[k + i] \
+                           * np.cos(2*np.pi*sp[2]*dp[3*k + i] * x + dp[2*k + i]) \
+                           * np.cos(2*np.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+
+            return pt
+
+        @nb.njit(__AC_FUN_SIG, inline='always')
+        def _GRADP(t, x, sp, dp):
+            """
+            The gradient of the pressure field \n
+            Argumens: \n
+                t (nb.float64)      - Dimensionless time
+                x (nb.float64[:])   - Dimensionless bubble position
+                sp(nb.float64[:])   - Static constants
+                dp(nb.float64[:])   - Dynamic constants
+
+            Returns: \n
+                px (nb.float64[:])  - Gradient of the pressure field (dp/dx)
+            """
+
+            px = np.zeros_like(x)
+            for i in range(k):
+                px-= dp[i] * dp[3*k + i] \
+                           * np.sin(2*np.pi*sp[2]*dp[3*k + i] * x + dp[2*k + i]) \
+                           * np.sin(2*np.pi*sp[1]*dp[  k + i] * t + dp[2*k + i]) 
+            
+            return px
+
+        @nb.njit(__AC_FUN_SIG, inline='always')
+        def _UAC(t, x, sp, dp):
+            """
+            The particle velocity induced by the acoustic irradiation
+            Arguments: \n
+                t (nb.float64)      - Dimensionless time
+                x (nb.float64[:])   - Dimnesionless bubble position
+                sp(nb.float64[:])   - Static constants
+                dp(nb.gloat64[:])   - Dynamic constants
+
+            Returns: \n
+                ux (nb.float64)      - Particle velocity ux
+            """
+
+            ux = np.zeros_like(x)
+            for i in range(k):
+                ux-= dp[i] * sp[4] \
+                           * np.sin(2*np.pi*sp[2]*dp[3*k +i] * x + dp[2*k + i]) \
+                           * np.cos(2*np.pi*sp[1]*dp[  k +i] * t + dp[2*k + i])
+
+            return ux
+        
     elif ac_field == "SW_N":
         """Standing Wave with NODE located at x = 0"""
         
@@ -197,7 +284,7 @@ def setup(ac_field, k):
 
             ux = np.zeros_like(x)
             for i in range(k):
-                ux+=-dp[i] * sp[4] \
+                ux+= dp[i] * sp[4] \
                            * np.cos(2*np.pi*sp[2]*dp[3*k +i] * x + dp[2*k + i]) \
                            * np.cos(2*np.pi*sp[1]*dp[  k +i] * t + dp[2*k + i])
 

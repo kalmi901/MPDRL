@@ -1,6 +1,7 @@
 import numba as nb
 from numba import cuda
 import math
+from . import AC1D
 
 # ----------------- ODE Solver Parameters ------------------
 DEFAULT_SOLVER_OPTS = {
@@ -73,7 +74,7 @@ DP = {
 }
 
 
-__AC_FUN_SIG = nb.float64(nb.float64, nb.float64, nb.float64[:], nb.float64[:])
+#__AC_FUN_SIG = nb.float64(nb.float64, nb.float64, nb.float64[:], nb.float64[:])
 def setup(k=DEFAULT_EQ_PROPS["k"], ac_field="CONST"):
     global _PA, _PAT, _GRADP, _UAC
     global per_thread_ode_function
@@ -81,7 +82,9 @@ def setup(k=DEFAULT_EQ_PROPS["k"], ac_field="CONST"):
     print("Initialize the ode system")
     print(f"Number of harmonoc compoentes: {k}")
     print(f"Acoustic field type: {ac_field}")
+    _PA, _PAT, _GRADP, _UAC = AC1D.setup(ac_field, k)
 
+    """
     # ----------------- ACOUSTIC FIELD ------------------------
     if ac_field == "CONST":
         @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
@@ -145,7 +148,7 @@ def setup(k=DEFAULT_EQ_PROPS["k"], ac_field="CONST"):
         def _UAC(t, x, sp, dp):
             ux = 0.0
             for i in range(k):
-                ux+=-dp[i] * sp[4] \
+                ux+= dp[i] * sp[4] \
                            * math.cos(2*math.pi*sp[2]*dp[3*k +i] * x + dp[2*k + i]) \
                            * math.cos(2*math.pi*sp[1]*dp[  k +i] * t + dp[2*k + i])
             return ux
@@ -153,6 +156,7 @@ def setup(k=DEFAULT_EQ_PROPS["k"], ac_field="CONST"):
     else:
         print("Acoustic field type is not correct!")
         exit()
+    """
 
 
     # ------------------- ODE Functions -----------------------

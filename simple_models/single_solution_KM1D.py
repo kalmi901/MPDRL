@@ -36,13 +36,14 @@ def setup(ac_field, k):
         Homogeneous pressure field (p_i(x,t) = P_{Ai} * sin(omega_i * t + phi_i) )
         """
         @nb.njit(__AC_FUN_SIG, inline="always")
-        def _PA(t, x, cp):
+        def _PA(t, x, sp, dp):
             """
             Excitation Pressure (k-frequency) \n
             Arguments: \n
                 t (nb.float64)      - Dimensionless time
                 x (nb.float64)      - Dimensionless position of the bubble
-                cp(nb.float64[:])   - Pre-computed constants
+                sp(nb.float64[:])   - Static constants
+                dp(nb.float64[:])   - Dynamic constants
 
             Returns: \n
                 p (nb.float64)      - Pressure amplitude
@@ -50,18 +51,19 @@ def setup(ac_field, k):
 
             p = 0.0
             for i in range(k):
-                p += cp[17 + i] * np.sin(2*np.pi*cp[9]*cp[17+k + i] * t + cp[17+2*k + i])
+                p += dp[i] * np.sin(2*np.pi*sp[1]*dp[k + i] * t + dp[2*k + i])
 
             return p
 
         @nb.njit(__AC_FUN_SIG, inline='always')
-        def _PAT(t, x, cp):
+        def _PAT(t, x, sp, dp):
             """
             The time derivative of the excitation pressure \n
             Arguments: \n
                 t (nb.float64)      - Dimensionless time
                 x (nb.float64)      - Dimensionless postion of the bubble
-                cp(nb.float64[:])   - Pre-computed constants
+                sp(nb.float64[:])   - Static constants
+                dp(nb.float64[:])   - Dynamic constants
 
             Returns: \n
                 pt(nb.float64)       - time derivative of pressure amplitude
@@ -69,13 +71,13 @@ def setup(ac_field, k):
 
             pt = 0.0
             for i in range(k):
-                pt += cp[17 + i] * cp[16+k + i] \
-                    * np.cos(2*np.pi*cp[9]*cp[17+k + i] * t + cp[17+2*k + i])
+                pt += dp[i] * dp[k + i] \
+                    * np.cos(2*np.pi*sp[1]*dp[k + i] * t + dp[2*k + i])
 
             return  pt
 
         @nb.njit(__AC_FUN_SIG, inline='always')
-        def _GRADP(t, x, cp):
+        def _GRADP(t, x, sp, dp):
             """
             The gradient of the pressure field.
             Note: Zero for homogeneous pressure field
@@ -83,7 +85,7 @@ def setup(ac_field, k):
             return 0.0
 
         @nb.njit(__AC_FUN_SIG, inline='always')
-        def _UAC(t, x, cp):
+        def _UAC(t, x, sp, dp):
             """
             The particel velocity induced by the acoustic irradiation
             Note: Zero for homogeneous pressure field
@@ -93,9 +95,92 @@ def setup(ac_field, k):
     elif ac_field == "SW_A":
         """Standing Wawe with ANTINODE located at x = 0 """
 
-        pass
+        @nb.njit(__AC_FUN_SIG, inline='always')
+        def _PA(t, x, sp, dp):
+            """
+            Excitation Pressure (dual-frequency) \n
+            Arguments: \n
+                t (nb.float64)      - Dimensionless time
+                x (nb.float64)      - Dimensionless position of the bubble
+                sp(nb.float64[:])   - Static constants
+                dp(nb.float64[:])   - Dynamic constants
 
+            Returns: \n
+                p (nb.float64)      - Pressure amplitude
+            """
 
+            p = 0.0
+            for i in range(k):
+                p += dp[i]  * np.cos(2*np.pi*sp[2]*dp[3*k + i] * x + dp[2*k + i]) \
+                            * np.sin(2*np.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+
+            return p
+
+        @nb.njit(__AC_FUN_SIG, inline='always')
+        def _PAT(t, x, sp, dp):
+            """
+            The time derivative of the excitation pressure \n
+            Arguments: \n
+                t (nb.float64)      - Dimensionless time
+                x (nb.float64)      - Dimensionless postion of the bubble
+                sp(nb.float64[:])   - Static constants
+                dp(nb.float64[:])   - Dynamic constants
+
+            Returns: \n
+                pt(nb.float64)       - time derivative of pressure amplitude
+            """
+
+            pt = 0.0
+            for i in range(k):
+                pt+= dp[i] * dp[k + i] \
+                           * np.cos(2*np.pi*sp[2]*dp[3*k + i] * x + dp[2*k + i]) \
+                           * np.cos(2*np.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+
+            return pt
+
+        @nb.njit(__AC_FUN_SIG, inline='always')
+        def _GRADP(t, x, sp, dp):
+            """
+            The gradient of the pressure field \n
+            Argumens: \n
+                t (nb.float64)      - Dimensionless time
+                x (nb.float64)      - Dimensionless bubble position
+                sp(nb.float64[:])   - Static constants
+                dp(nb.float64[:])   - Dynamic constants
+
+            Returns: \n
+                p (nb.float64)      - Gradient of the pressure field (dp/dx)
+            """
+
+            px = 0.0
+            for i in range(k):
+                px-= dp[i] * dp[3*k + i] \
+                           * np.sin(2*np.pi*sp[2]*dp[3*k + i] * x + dp[2*k + i]) \
+                           * np.sin(2*np.pi*sp[1]*dp[  k + i] * t + dp[2*k + i]) 
+            
+            return px
+
+        @nb.njit(__AC_FUN_SIG, inline='always')
+        def _UAC(t, x, sp, dp):
+            """
+            The particle velocity induced by the acoustic irradiation
+            Arguments: \n
+                t (nb.float64)      - Dimensionless time
+                x (nb.float64)      - Dimnesionless bubble position
+                sp(nb.float64[:])   - Static constants
+                dp(nb.gloat64[:])   - Dynamic constants
+
+            Returns: \n
+                ux (nb.float64)      - Particle velocity ux
+            """
+
+            ux = 0.0
+            for i in range(k):
+                ux-= dp[i] * sp[4] \
+                           * np.sin(2*np.pi*sp[2]*dp[3*k +i] * x + dp[2*k + i]) \
+                           * np.cos(2*np.pi*sp[1]*dp[  k +i] * t + dp[2*k + i])
+
+            return ux
 
 
     elif ac_field == "SW_N":
@@ -182,7 +267,7 @@ def setup(ac_field, k):
 
             ux = 0.0
             for i in range(k):
-                ux+=-dp[i] * sp[4] \
+                ux+= dp[i] * sp[4] \
                            * np.cos(2*np.pi*sp[2]*dp[3*k +i] * x + dp[2*k + i]) \
                            * np.cos(2*np.pi*sp[1]*dp[  k +i] * t + dp[2*k + i])
 

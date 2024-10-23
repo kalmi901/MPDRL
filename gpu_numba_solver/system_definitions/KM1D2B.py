@@ -1,6 +1,7 @@
 import numba as nb
 from numba import cuda
 import math
+from . import AC1D
 
 # ----------------- ODE Solver Parameters ------------------
 DEFAULT_SOLVER_OPTS = {
@@ -80,125 +81,135 @@ DP = {
 }
 
 
-__AC_FUN_SIG = nb.float64(nb.float64, nb.float64, nb.float64[:], nb.float64[:])
-# ----------------- ACOUSTIC FIELD ------------------------
-k = DEFAULT_EQ_PROPS["k"]
-@cuda.jit(__AC_FUN_SIG, device=True, inline=True)
-def _PA(t, x, sp, dp):
-    p = 0.0
-    for i in range(k):
-        p += dp[i] * math.sin(2*math.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+#__AC_FUN_SIG = nb.float64(nb.float64, nb.float64, nb.float64[:], nb.float64[:])
+def setup(k=DEFAULT_EQ_PROPS["k"], ac_field="CONST"):
+    global _PA, _PAT, _GRADP, _UAC
+    global per_thread_ode_function
 
-    return p
+    print("Initialize the ode system")
+    print(f"Number of harmonoc compoentes: {k}")
+    print(f"Acoustic field type: {ac_field}")
+    _PA, _PAT, _GRADP, _UAC = AC1D.setup(ac_field, k)
+    """
+    # ----------------- ACOUSTIC FIELD ------------------------
+    k = DEFAULT_EQ_PROPS["k"]
+    @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
+    def _PA(t, x, sp, dp):
+        p = 0.0
+        for i in range(k):
+            p += dp[i] * math.sin(2*math.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+
+        return p
 
 
-@cuda.jit(__AC_FUN_SIG, device=True, inline=True)
-def _PAT(t, x, sp, dp):
-    pt = 0.0
-    for i in range(k):
-        pt+= dp[i] * dp[k + i] \
-                    * math.cos(2*math.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+    @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
+    def _PAT(t, x, sp, dp):
+        pt = 0.0
+        for i in range(k):
+            pt+= dp[i] * dp[k + i] \
+                        * math.cos(2*math.pi*sp[1]*dp[  k + i] * t + dp[2*k + i])
+            
+        return pt
+
+    @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
+    def _GRADP(t, x, sp, dp):
+        return 0.0
+
+    @cuda.jit(__AC_FUN_SIG, device=True, inline=True)
+    def _UAC(t, x, sp, dp):
+        return 0.0
+    """
+
+    # ------------------- ODE Functions -----------------------
+    @cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
+    def per_thread_ode_function(tid, t, dx, x, acc, cp, dp, sp):
         
-    return pt
+        rd = 1.0 / abs(x[3]-x[2])                       # Inverse distance
+        s  = cuda.local.array((2, ), dtype=nb.float64)
+        b = cuda.local.array((4, ),  dtype=nb.float64)
+        A = cuda.local.array((4, 4), dtype=nb.float64)
+        for i in range(4):
+            for j in range(4):
+                A[i,j] = 0.0
 
-@cuda.jit(__AC_FUN_SIG, device=True, inline=True)
-def _GRADP(t, x, sp, dp):
-    return 0.0
-
-@cuda.jit(__AC_FUN_SIG, device=True, inline=True)
-def _UAC(t, x, sp, dp):
-    return 0.0
-
-# ------------------- ODE Functions -----------------------
-@cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
-def per_thread_ode_function(tid, t, dx, x, acc, cp, dp, sp):
-    
-    rd = 1.0 / abs(x[3]-x[2])                       # Inverse distance
-    s  = cuda.local.array((2, ), dtype=nb.float64)
-    b = cuda.local.array((4, ),  dtype=nb.float64)
-    A = cuda.local.array((4, 4), dtype=nb.float64)
-    for i in range(4):
-        for j in range(4):
-            A[i,j] = 0.0
-
-    s[0] = 1.0
-    s[1] =-1.0
-    for i in range(2):
-        x0i = x[i]
-        x1i = x[2 + i]
-        x2i = x[4 + i]
-        x3i = x[6 + i]
+        s[0] = 1.0
+        s[1] =-1.0
+        for i in range(2):
+            x0i = x[i]
+            x1i = x[2 + i]
+            x2i = x[4 + i]
+            x3i = x[6 + i]
 
 
-        # Reversed
-        x0j = x[1 - i]
-        x2j = x[5 - i]
-        x3j = x[7 - i]
+            # Reversed
+            x0j = x[1 - i]
+            x2j = x[5 - i]
+            x3j = x[7 - i]
 
-        rx0 = 1.0 / x0i
-        p = rx0**sp[0]
-        n_cp = i * 16         # Offset in CP
+            rx0 = 1.0 / x0i
+            p = rx0**sp[0]
+            n_cp = i * 16         # Offset in CP
 
-        # Radial Oscillation
-        N = (cp[0+n_cp] + cp[1+n_cp]*x2i) * p \
-                - cp[2+n_cp] * (1 + cp[7+n_cp]*x2i) - cp[3+n_cp]* rx0 - cp[4+n_cp]*x2i*rx0 \
-                - 1.5 * (1.0 - cp[7+n_cp]*x2i * (1.0/3.0))*x2i*x2i \
-                - (1 + cp[7+n_cp]*x2i) * cp[5+n_cp] * _PA(t, x1i, sp, dp) - cp[6+n_cp] * _PAT(t, x1i, sp, dp) * x0i \
-                + cp[8+n_cp] * x3i*x3i \
-                + cp[13+n_cp] * rd * (-2*x0j*x2j**2                                      
-                            + 0.5 * rd*x0j**2 
-                            * ( s[i]*(x3i*x2j + x2j*x3j) 
-                            - rd*x0j*x3j*(x3i + 2*x3j) ))
+            # Radial Oscillation
+            N = (cp[0+n_cp] + cp[1+n_cp]*x2i) * p \
+                    - cp[2+n_cp] * (1 + cp[7+n_cp]*x2i) - cp[3+n_cp]* rx0 - cp[4+n_cp]*x2i*rx0 \
+                    - 1.5 * (1.0 - cp[7+n_cp]*x2i * (1.0/3.0))*x2i*x2i \
+                    - (1 + cp[7+n_cp]*x2i) * cp[5+n_cp] * _PA(t, x1i, sp, dp) - cp[6+n_cp] * _PAT(t, x1i, sp, dp) * x0i \
+                    + cp[8+n_cp] * x3i*x3i \
+                    + cp[13+n_cp] * rd * (-2*x0j*x2j**2                                      
+                                + 0.5 * rd*x0j**2 
+                                * ( s[i]*(x3i*x2j + x2j*x3j) 
+                                - rd*x0j*x3j*(x3i + 2*x3j) ))
 
-        D = x0i - cp[7+n_cp]*x0i*x2i + cp[4+n_cp]*cp[7+n_cp]
-        rD = 1.0 / D
+            D = x0i - cp[7+n_cp]*x0i*x2i + cp[4+n_cp]*cp[7+n_cp]
+            rD = 1.0 / D
 
-        # Radial Coupling
-        tmp = cp[13+n_cp] * x0j*x0j*rd*rD
-        A[i,   i] = 1.0
-        A[i, 1-i] = tmp                                  # i = 0;    A[0, 1]     i = 1; A[1, 0]
-        A[i, 3-i] =-tmp * 0.5 *s[i] * x0j * rd           # i = 0;    A[0, 3]     i = 1; A[1, 2]
-        b[i]      = N * rD
+            # Radial Coupling
+            tmp = cp[13+n_cp] * x0j*x0j*rd*rD
+            A[i,   i] = 1.0
+            A[i, 1-i] = tmp                                  # i = 0;    A[0, 1]     i = 1; A[1, 0]
+            A[i, 3-i] =-tmp * 0.5 *s[i] * x0j * rd           # i = 0;    A[0, 3]     i = 1; A[1, 2]
+            b[i]      = N * rD
 
-        # Translational motion
-        vj = cp[12+n_cp] * x0j*x0j * rd*rd * (-s[i]*x2j + x0j*x3j*rd)                    
-        Fb1 = - cp[10+n_cp]*x0i*x0i*x0i * _GRADP(t, x1i, sp, dp)                         # Primary Bjerknes Force
-        Fd  = - cp[11+n_cp]*x0i * (x3i*sp[3] - _UAC(t, x1i, sp, dp) - vj)                # Drag Force
+            # Translational motion
+            vj = cp[12+n_cp] * x0j*x0j * rd*rd * (-s[i]*x2j + x0j*x3j*rd)                    
+            Fb1 = - cp[10+n_cp]*x0i*x0i*x0i * _GRADP(t, x1i, sp, dp)                         # Primary Bjerknes Force
+            Fd  = - cp[11+n_cp]*x0i * (x3i*sp[3] - _UAC(t, x1i, sp, dp) - vj)                # Drag Force
 
-        du = 3*(Fb1+Fd)*cp[9+n_cp]*rx0*rx0*rx0 - 3.0*x2i*rx0*x3i \
-            + cp[14+n_cp] *rd*rd*x0j * (-s[i]*x2j * (x0j*x2i + 2*x0i*x2j)
-                                   +x0j*rd*x3j * (x0j*x2i + 5*x0i*x2j) ) * rx0
-        
-        # Translational Coupling
-        tmp = cp[14+n_cp] * x0i * x0j*x0j * rd*rd * rx0
-        A[i+2,i+2] = 1.0
-        A[i+2,1-i] = tmp * s[i]                          # i = 0;    A[2, 1]    i = 1;   A[3; 0]
-        A[i+2,3-i] =-tmp * x0j*rd                        # i = 0;    A[2, 3]    i = 1;   A[3, 2]
-        b[2+i]     = du
+            du = 3*(Fb1+Fd)*cp[9+n_cp]*rx0*rx0*rx0 - 3.0*x2i*rx0*x3i \
+                + cp[14+n_cp] *rd*rd*x0j * (-s[i]*x2j * (x0j*x2i + 2*x0i*x2j)
+                                    +x0j*rd*x3j * (x0j*x2i + 5*x0i*x2j) ) * rx0
+            
+            # Translational Coupling
+            tmp = cp[14+n_cp] * x0i * x0j*x0j * rd*rd * rx0
+            A[i+2,i+2] = 1.0
+            A[i+2,1-i] = tmp * s[i]                          # i = 0;    A[2, 1]    i = 1;   A[3; 0]
+            A[i+2,3-i] =-tmp * x0j*rd                        # i = 0;    A[2, 3]    i = 1;   A[3, 2]
+            b[2+i]     = du
 
-    # Gauss Elimination
-    for i in range(4):
-        for j in range(i + 1, 4):
-            c = -A[j,i] / A[i,i]
-            b[j] += c * b[i]
-            A[j,i] = 0.0
-            for k in range(i+1,4):
-                A[j,k] += c * A[i,k]
+        # Gauss Elimination
+        for i in range(4):
+            for j in range(i + 1, 4):
+                c = -A[j,i] / A[i,i]
+                b[j] += c * b[i]
+                A[j,i] = 0.0
+                for k in range(i+1,4):
+                    A[j,k] += c * A[i,k]
 
-    # Backward substitution
-    y = cuda.local.array((4, ), dtype=nb.float64)
-    for i in range(3, -1, -1):
-        y[i] = b[i] / A[i,i]
-        for j in range(i-1, -1, -1):
-            b[j] -= A[j,i] * y[i]
+        # Backward substitution
+        y = cuda.local.array((4, ), dtype=nb.float64)
+        for i in range(3, -1, -1):
+            y[i] = b[i] / A[i,i]
+            for j in range(i-1, -1, -1):
+                b[j] -= A[j,i] * y[i]
 
 
-    # Copy Back derivatives
-    for i in range(8):
-        if i  < 4:
-            dx[i] = x[i+4]
-        else:
-            dx[i] = y[i-4] 
+        # Copy Back derivatives
+        for i in range(8):
+            if i  < 4:
+                dx[i] = x[i+4]
+            else:
+                dx[i] = y[i-4] 
 
 
 # --------------------- ACCESSORIES --------------------------
