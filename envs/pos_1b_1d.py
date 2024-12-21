@@ -119,10 +119,6 @@ class Pos1B1D(BubbleGPUEnv):
             bubble_positions = torch.full(size=(self.num_envs,), fill_value=self.initial_position, dtype=torch.float32, device="cuda").contiguous()
         else:
             print("Err: initial bubble position is not created!")
- 
-        if "X" in self.observed_variables.keys():
-            for _ in range(self.observed_variables["X"]["len"]):
-                self.observed_variables["X"]["values"].appendleft(bubble_positions.clone())
 
 
         # Set Target positions ---------------
@@ -135,10 +131,27 @@ class Pos1B1D(BubbleGPUEnv):
         else:
             print("Err: target bubble position is not created!")
 
+
+        # Handle overlap
+        random_values = torch.rand(bubble_positions.shape, dtype=torch.float32, device="cuda") * (2*self.position_tolerance) + self.position_tolerance
+        signs = torch.randint(0, 2, bubble_positions.shape, dtype=torch.float32, device="cuda") * 2 - 1 
+        random_values *= signs  
+
+        # Maszk létrehozása a feltétel alapján
+        mask = torch.abs(bubble_positions - target_positions) <= self.position_tolerance
+
+        bubble_positions = bubble_positions + mask * random_values
+
         if "XT" in self.observed_variables.keys():
             for _ in range(self.observed_variables["XT"]["len"]):
                 self.observed_variables["XT"]["values"].appendleft(target_positions.clone())
 
+    
+        if "X" in self.observed_variables.keys():
+            for _ in range(self.observed_variables["X"]["len"]):
+                self.observed_variables["X"]["values"].appendleft(bubble_positions.clone())
+        
+        
         # Initialize Radius
         # TODO: add random size distribution
         self.R0s = torch.full(size=(self.num_envs, ), fill_value=self.R0, dtype=torch.float32, device="cuda").contiguous()
@@ -179,10 +192,6 @@ class Pos1B1D(BubbleGPUEnv):
         else:
             print("Err: initial bubble position is created!")
  
-        for i, tid in enumerate(env_ids):
-            if "X" in self.observed_variables.keys():
-                for j in range(self.observed_variables["X"]["len"]):
-                    self.observed_variables["X"]["values"][j][tid] = bubble_positions[i]
 
         # Set Target positions ---------------
         if (self.target_position == "random"):
@@ -194,10 +203,27 @@ class Pos1B1D(BubbleGPUEnv):
         else:
             print("Err: target bubble position is not created!")
 
+
+        # Handle overlap
+        random_values = torch.rand(bubble_positions.shape, dtype=torch.float32, device="cuda") * (2*self.position_tolerance) + self.position_tolerance
+        signs = torch.randint(0, 2, bubble_positions.shape, dtype=torch.float32, device="cuda") * 2 - 1 
+        random_values *= signs  
+
+        # Maszk létrehozása a feltétel alapján
+        mask = torch.abs(bubble_positions - target_positions) <= self.position_tolerance
+
+        bubble_positions = bubble_positions + mask * random_values
+
+
         for i, tid in enumerate(env_ids):
             if "XT" in self.observed_variables.keys():
                 for j in range(self.observed_variables["XT"]["len"]):
                     self.observed_variables["XT"]["values"][j][tid] = target_positions[i]
+
+        for i, tid in enumerate(env_ids):
+            if "X" in self.observed_variables.keys():
+                for j in range(self.observed_variables["X"]["len"]):
+                    self.observed_variables["X"]["values"][j][tid] = bubble_positions[i]
 
         # Initialize Radius
         # TODO: add random size distribution

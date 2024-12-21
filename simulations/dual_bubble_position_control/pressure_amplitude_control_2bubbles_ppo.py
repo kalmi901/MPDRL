@@ -16,9 +16,9 @@ RENDER_ON_TRAIN = False
 
 
 # Vectorizazion specific parameters ()
-ROLLOUT_STEPS       = 128 
+ROLLOUT_STEPS       = 512 
 NUM_ENVS            = 128
-NUM_UPDATE_EPOCHS   = 10
+NUM_UPDATE_EPOCHS   = 8
 MINI_BATCH_SIZE     = 128
 
 
@@ -26,31 +26,31 @@ MINI_BATCH_SIZE     = 128
 # ACOUSTIC FIELD (Initial values)
 NUMBER_OF_HARMONICS     = 2
 ACOUSTIC_FIELD_TYPE     = "SW_A"            # Standing Wave Antinode located at x = 0
-EXCITATION_FREQUENCIES  = [25.0, 50.0]      # [kHz]
+EXCITATION_FREQUENCIES  = [25.0, 250.0]     # [kHz]
 PHASE_SHIFT             = [0.0, 0.0]        # [radians]
 PRESSURE_AMPLITUDE      = [0.0, 0.0]        # [bar] - initialized with unexcited case
 
 # STATIC FEATURES 
-EQUILIBRIUM_RADIUS      = [60.0, 60.0]      # [micron] - the present implementation suppors fixed value
+EQUILIBRIUM_RADIUS      = [50.0, 50.0]      # [micron] - the present implementation suppors fixed value
 TIME_STEP_LENGTH        = 50                # number acoustic cycles per action
-MAX_STEPS_PER_EPISODE   = 500               # number actions per episode
+MAX_STEPS_PER_EPISODE   = 512               # number actions per episode
 INITIAL_POSITION        = "random"           
 TARGET_POSITION         = 0.0
 APPLY_TERMINATION       = True              # Halt the environment if distance is less than the tolerace
 POSITION_TOLERANCE      = 0.01
-DISTANCE_LIMIT          = [0.2, 0.205] 
-REWARD_WEIGHTS          = [0.9, 0.05, 0.05]   # Target position, distance penalty, intensity penalty
-REWARD_EXPS             = 0.2
+DISTANCE_LIMIT          = [0.2, 0.25] 
+REWARD_WEIGHTS          = [0.5, 0.5, 0.00]   # Target position, distance penalty, intensity penalty
+REWARD_EXPS             = 0.8
 
 
 ACTION_SPACE = ActionSpaceDict(
     PA = {"IDX": [0, 1], "MIN": [0.0, 0.0], "MAX": [1.0, 1.0], "TYPE": "Box"},
-    PS = {"IDX": [0, 1], "MIN": [0.0, 0.0], "MAX": [0.5*pi, 0.5*pi], "TYPE": "Box"}
+    PS = {"IDX": [0, 1], "MIN": [-0.5*pi, -0.5*pi], "MAX": [0.5*pi, 0.5*pi], "TYPE": "Box"}
     ) 
 
 OBSERVATION_SPACE = ObservationSpaceDict(
     XT = {"IDX": [0], "MIN": [-0.15], "MAX": [0.15], "TYPE": "Box"},
-    X  = {"IDX": [0, 1], "MIN": [-0.50, 0.50], "MAX": [0.50, 0.50], "TYPE": "Box", "STACK": 2}
+    X  = {"IDX": [0, 1], "MIN": [-0.50, -0.50], "MAX": [0.50, 0.50], "TYPE": "Box", "STACK": 2}
     )
 
 
@@ -61,7 +61,7 @@ GAMMA               = 0.99
 GAE_LAMDA           = 0.95
 CLIP_COEF           = 0.2
 CLIP_VLOSS          = True
-ENT_COEF            = 0.01
+ENT_COEF            = 0.05
 VF_COEF             = 1.0
 MAX_GRAD_NORM       = 2.5
 TARGET_KL           = None
@@ -96,7 +96,9 @@ def train():
         reward_exp=REWARD_EXPS,
         render_env=RENDER_ON_TRAIN,
         apply_termination=APPLY_TERMINATION,
-        seed=SEED
+        seed=SEED,
+        positive_terminal_reward=MAX_STEPS_PER_EPISODE,
+        negative_terminal_reward=-MAX_STEPS_PER_EPISODE
     )
 
 

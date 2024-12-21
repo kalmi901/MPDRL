@@ -53,11 +53,14 @@ class Pos2B1D(BubbleGPUEnv):
 
         SOLVER_OPTS["NT"] = num_envs
         EQ_PROPS["k"] = components
+        EQ_PROPS["FREQ"] = []
+        EQ_PROPS["PS"] = []
+        EQ_PROPS["PA"] = []
         if all(len(lst) == components for lst in [freqs, pa, phase_shift]):
             for i in range(components):
-                EQ_PROPS["FREQ"][i] = freqs[i] * 1.0e3
-                EQ_PROPS["PS"][i]   = phase_shift[i]
-                EQ_PROPS["PA"][i]   = pa[i] * 1.0e5 
+                EQ_PROPS["FREQ"].append(freqs[i] * 1.0e3)
+                EQ_PROPS["PS"].append(phase_shift[i])
+                EQ_PROPS["PA"].append(pa[i] * 1.0e5)
         else:
             print("Err: The number of components differs from the length of the provided parameter lists.")
             exit()
@@ -140,7 +143,7 @@ class Pos2B1D(BubbleGPUEnv):
             print("Err: bubble positions are not initialized!")
 
         distance = torch.rand(size=(self.num_envs, ), dtype=torch.float32, device="cuda").contiguous() \
-                    * (self.max_distance - self.min_distance) + self.min_distance
+                    * (2*self.max_distance - self.min_distance) + self.min_distance
 
         bubble_pos_0 = torch.clamp((mean_postion - 0.5*distance), self.observation_space_dict.X["MIN"][0], self.observation_space_dict.X["MAX"][0])
         bubble_pos_1 = torch.clamp((bubble_pos_0 + 1.0*distance), self.observation_space_dict.X["MIN"][1], self.observation_space_dict.X["MAX"][1])
@@ -218,7 +221,7 @@ class Pos2B1D(BubbleGPUEnv):
             print("Err: bubble positions are not initialized!")
 
         distance = torch.rand(size=(num_envs, ), dtype=torch.float32, device="cuda").contiguous() \
-                    * (self.max_distance - self.min_distance) + self.min_distance
+                    * (2*self.max_distance - self.min_distance) + self.min_distance
 
         bubble_pos_0 = torch.clamp((mean_postion - 0.5*distance), self.observation_space_dict.X["MIN"][0], self.observation_space_dict.X["MAX"][0])
         bubble_pos_1 = torch.clamp((bubble_pos_0 + 1.0*distance), self.observation_space_dict.X["MIN"][1], self.observation_space_dict.X["MAX"][1])
@@ -340,7 +343,7 @@ class Pos2B1D(BubbleGPUEnv):
             ax0.plot([id for id in range(self.num_envs)], mean_pos,   "r+", markersize=4)
             ax0.plot([id for id in range(self.num_envs)], bubble_pos0, "k.", markersize=10)
             ax0.plot([id for id in range(self.num_envs)], bubble_pos1, "k.", markersize=10)
-            ax0.set_ylim(-0.55, 0.55)     # TODO: 
+            ax0.set_ylim(-0.26, 0.26)     # TODO: 
             ax0.set_xlabel(r"Environment")
             ax0.set_ylabel(r"$x/\lambda_r$")
             ax0.grid("both")
@@ -375,9 +378,9 @@ class Pos2B1D(BubbleGPUEnv):
         pa_idx = self.action_space_dict.PA["IDX"]
         intesity = torch.sum(self._actions[:, pa_idx], axis=1)**0.5
 
-        self._rewards = - self.w[0] * (target_distance / max_distance)**self.b   \
-                        - self.w[1] * (  torch.max(torch.tensor(0), self.min_distance - bubble_distance)
-                                       + torch.max(torch.tensor(0), bubble_distance - self.max_distance) ) \
+        self._rewards = 1.0 - self.w[0] * (target_distance / max_distance)**self.b   \
+                        - self.w[1] * (  torch.max(torch.zeros_like(bubble_distance), self.min_distance - bubble_distance)
+                                       + torch.max(torch.zeros_like(bubble_distance), bubble_distance - self.max_distance) ) / self.max_distance \
                         - self.w[2] * intesity \
                         +self.negative_terminal_reward * self._negative_terminal \
                         +self.positive_terminal_reward * self._positive_terminal

@@ -8,7 +8,7 @@ try:
 except:
     pass
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 def process_final_observation(next_obs: torch.Tensor, infos: Dict):
     real_next_obs = next_obs.clone()
@@ -23,6 +23,27 @@ def save_model(model: nn.Module, path: str, fname: str):
 def load_model(model: nn.Module, path:str, fname: str):
     model.load_state_dict(torch.load(os.path.join(path, fname)))
 
+ACTIVATIONS = ["ReLU", "Tanh", "lReLU"]
+def get_activation(activation: str) ->torch.nn.Module:
+    if activation == ACTIVATIONS[0]:
+        return nn.ReLU()
+    elif activation == ACTIVATIONS[1]:
+        return nn.Tanh()
+    elif activation == ACTIVATIONS[2]:
+        return nn.LeakyReLU()
+    else:
+        print(f"Err: Invalid activation function name: {activation}!")
+        exit()
+
+
+def build_network(dims: List[int], activations: List[str]) -> torch.nn.Module:
+    layers = []
+    for i, act in enumerate(activations):
+        layers.append(nn.Linear(dims[i], dims[i+1]))
+        if act is not None:
+            layers.append(get_activation(act))
+
+    return nn.Sequential(*layers)
 
 class TFWriter(SummaryWriter):
     def __init__(self, log_dir: str, project_name: str, run_name: str, model: Any):

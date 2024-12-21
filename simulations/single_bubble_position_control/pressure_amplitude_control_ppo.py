@@ -7,17 +7,17 @@ import time
 
 # EXPERIMENT PROPERTIES
 PROJECT_NAME = "TestRuns"
-TRIAL_NAME   = f"TrialRun_{int(time.time())}"
+TRIAL_NAME   = f"PPO_PA_CONTROL{int(time.time())}"
 SAVE_WANDB   = False
 LOG_TRAINING = True
 LOG_FREQ     = 1
 SEED         = 42
 
 # Vectorizazion specific parameters ()
-ROLLOUT_STEPS       = 128 
-NUM_ENVS            = 8
-NUM_UPDATE_EPOCHS   = 10
-MINI_BATCH_SIZE     = 128
+ROLLOUT_STEPS       = 24 
+NUM_ENVS            = 512
+NUM_UPDATE_EPOCHS   = 80
+MINI_BATCH_SIZE     = 256
 
 
 # ENVIRONMENT PROPERTIES ----
@@ -30,8 +30,8 @@ PRESSURE_AMPLITUDE      = [0.0, 0.0]        # [bar] - initialized with unexcited
 
 # STATIC FEATURES 
 EQUILIBRIUM_RADIUS      = 60.0              # [micron] - the present implementation suppors fixed value
-TIME_STEP_LENGTH        = 50                # number acoustic cycles per action
-MAX_STEPS_PER_EPISODE   = 12                # number actions per episode
+TIME_STEP_LENGTH        = 5                 # number acoustic cycles per action
+MAX_STEPS_PER_EPISODE   = 100               # number actions per episode
 INITIAL_POSITION        = "random"           
 TARGET_POSITION         = "random"
 APPLY_TERMINATION       = True              # Halt the environment if distance is less than the tolerace
@@ -53,18 +53,18 @@ OBSERVATION_SPACE = ObservationSpaceDict(
 
 
 # HYPERPARAMETERS (DDPG)
-TOTAL_TIMESTEPS     = 500_000
+TOTAL_TIMESTEPS     = 5_000_000
 LEARNING_RATE       = 2.50e-4
 GAMMA               = 0.99
-GAE_LAMDA           = 0.95
-CLIP_COEF           = 0.2
+GAE_LAMDA           = 0.90
+CLIP_COEF           = 0.5
 CLIP_VLOSS          = True
-ENT_COEF            = 0.01
-VF_COEF             = 1.0
-MAX_GRAD_NORM       = 2.5
+ENT_COEF            = 0.05
+VF_COEF             = 4.0
+MAX_GRAD_NORM       = 0.5
 TARGET_KL           = None
-NORM_ADV            = False
-
+NORM_ADV            = True
+POLICY              = "Beta"        # "Gaussian" or "Beta"
 
 
 # Neural Networks
@@ -111,7 +111,8 @@ def train():
         cuda=True,
         torch_deterministic=True,
         seed=SEED,
-        net_archs=NET_ARCHS
+        net_archs=NET_ARCHS,
+        policy='Beta'
     )
 
 

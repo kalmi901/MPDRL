@@ -23,6 +23,9 @@ wandb
 wandb/*
 gpu_numba_solver/system_definitions/__pycache__
 gpu_numba_solver/system_definitions/__pycache__/*
+paramteter_study/__pycache__
+paramteter_study/__pycache__/*
+paramteter_study/data_repository/*
 simulations/__pycache__
 simulations/__pycache__/*
 simulations/single_bubble_position_control/__pycache__

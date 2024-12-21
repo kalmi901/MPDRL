@@ -186,6 +186,7 @@ class DDPG():
 
             global_step = 0     # timesteps
             num_updates = 0     # nn update
+            episodes    = 0
             train_loop  = 0     # number of training loops
             should_stop = False
             start_time = time.time()
@@ -219,10 +220,11 @@ class DDPG():
                     real_next_obs = process_final_observation(next_obs, infos)
                     if 'final_observation' in infos.keys():                        
                         for idx in range(len(infos['dones'])):
-                            print(f"global_step={global_step}, episode_return={infos['episode_return'][idx]}")
+                            episodes +=1
+                            print(f"global_step={global_step}, episode_return={infos['episode_return'][idx]:0.3f}, episode_length={infos['episode_length'][idx]:0.0f}")
                             if log_data:
-                                writer.add_scalar("charts/episode_return", infos["episode_return"][idx], global_step)
-                                writer.add_scalar("charts/episode_length", infos["episode_length"][idx], global_step)
+                                writer.add_scalar("charts/episode_return", infos["episode_return"][idx], episodes)
+                                writer.add_scalar("charts/episode_length", infos["episode_length"][idx], episodes)
 
                     self.memory.store_transitions(self.num_envs, obs, real_next_obs, actions, rewards, terminateds)
 

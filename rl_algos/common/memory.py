@@ -67,8 +67,9 @@ class RolloutBuffer():
         b_advantages= self.advantages.view(-1).to(device)
         b_returns   = self.returns.view(-1).to(device)
         b_values    = self.values.view(-1).to(device)
+        b_dones     = self.dones.view(-1).to(device)
 
-        return b_obs, b_logprobs, b_actions, b_advantages, b_returns, b_values
+        return b_obs, b_logprobs, b_actions, b_advantages, b_returns, b_values, b_dones
 
 
 

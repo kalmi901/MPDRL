@@ -3,7 +3,10 @@ import torch.nn as nn
 
 from typing import List, Union
 
-ACTIVATIONS = ["ReLU", "Tanh", "lReLU"]
+try:
+    from .utils import build_network
+except:
+    from utils import build_network
 
 
 class ActorCriticBetaPolicy(nn.Module):
@@ -44,18 +47,18 @@ class ActorCriticBetaPolicy(nn.Module):
 
         alpha, beta = torch.chunk(params, 2, dim=-1)
 
-        alpha = torch.nn.functional.softplus(alpha) + 1e-9  # Avoid instabilities
-        beta = torch.nn.functional.softplus(beta)   + 1e-9
+        alpha = torch.nn.functional.softplus(alpha) + 1.0  # Avoid instabilities
+        beta = torch.nn.functional.softplus(beta)   + 1.0
 
         # Beta distribution
         probs = torch.distributions.Beta(alpha, beta)
         
         if a is None:
-            a_unscaled = probs.sample()
+            a_unscaled = probs.rsample()
         else:
             a_unscaled = (a - self.action_bias) / self.action_scale
 
-        return a_unscaled *  self.action_scale +  self.action_bias, probs.log_prob(a_unscaled).sum(dim=-1), probs.entropy().sum(dim=-1), self.vf(f)
+        return a_unscaled *  self.action_scale +  self.action_bias, probs.log_prob(a_unscaled).sum(1), probs.entropy().sum(1), self.vf(f)
 
 
 # Combined Modules with optinal shared feature extraction 
@@ -68,9 +71,9 @@ class ActorCriticGaussianPolicy(nn.Module):
                  action_high: torch.Tensor,
                  action_low : torch.Tensor,
                  shared_dims: int = 0,
-                 log_std_max: float = -0.5,
-                 log_std_min: float = -20.0,
-                 log_std_init: float = -0.1,
+                 log_std_max: float = -1.0,
+                 log_std_min: float = -10.0,
+                 log_std_init: float = -2.0,
                  **kwargs) -> None:
         super().__init__()
 
@@ -78,11 +81,11 @@ class ActorCriticGaussianPolicy(nn.Module):
         self._log_std_min = log_std_min
         self._log_std = nn.Parameter(torch.ones(output_dim) * log_std_init, requires_grad=True)
 
-        self.register_buffer("action_high", action_high)
-        self.register_buffer("action_low",  action_low)
+        self.register_buffer("action_scale", (action_high - action_low) / 2.0)
+        self.register_buffer("action_bias",  (action_high + action_low) / 2.0)
 
         dims = [input_dim] + hidden_dims + [output_dim]
-        acts = activations + [None]     # Last Activation
+        acts = activations + ["Tanh"]     # Last Activation
 
         if shared_dims == 0:
             self.features = nn.Identity()
@@ -91,8 +94,8 @@ class ActorCriticGaussianPolicy(nn.Module):
             s_acts = acts[0:shared_dims]
             self.features = build_network(s_dims, s_acts)
 
-        self.pi = build_network(dims[shared_dims:], acts[shared_dims:])             # Policy
-        self.vf = build_network(dims[shared_dims:-1]+[1], acts[shared_dims:])       # Value Function
+        self.pi = build_network(dims[shared_dims:], acts[shared_dims:])                     # Policy
+        self.vf = build_network(dims[shared_dims:-1]+[1], acts[shared_dims:-1]+[None])      # Value Function
 
 
     def value(self, x: torch.Tensor) -> torch.Tensor:
@@ -100,27 +103,29 @@ class ActorCriticGaussianPolicy(nn.Module):
     
     def action(self, x: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
         mean = self.pi(self.features(x))
+        mean = mean * self.action_scale + self.action_bias 
 
         if deterministic:
             return mean
         
-        log_std = torch.ones_like(mean) * self._log_std.clamp(self._log_std_min, self._log_std_max)
-        std = log_std.exp()
+        log_std = self._log_std.clamp(self._log_std_min, self._log_std_max).expand_as(mean)
+        std = log_std.exp() * self.action_scale
 
-        return  torch.distributions.Normal(mean, std).sample().clamp(self.action_low, self.action_high)
+        return  torch.distributions.Normal(mean, std).sample()
 
 
     def forward(self, x: torch.Tensor, a: Union[torch.Tensor, None] = None):
         f = self.features(x)
         mean = self.pi(f)
-        log_std = torch.ones_like(mean) * self._log_std.clamp(self._log_std_min, self._log_std_max)
-        std = log_std.exp()
+        mean = mean * self.action_scale + self.action_bias
+        log_std = self._log_std.clamp(self._log_std_min, self._log_std_max).expand_as(mean)
+        std = log_std.exp() * self.action_scale
 
         probs = torch.distributions.Normal(mean, std)
         if a is None:
-            a = probs.sample()
+            a = probs.rsample()
 
-        return a.clamp(self.action_low, self.action_high), probs.log_prob(a).sum(1), probs.entropy().sum(1), self.vf(f)
+        return a, probs.log_prob(a).sum(1), probs.entropy().sum(1), self.vf(f)
 
 class ActorCriticDeterministicPolicy(nn.Module):
     def __init__(self,
@@ -134,7 +139,7 @@ class ActorCriticDeterministicPolicy(nn.Module):
                  **kwargs)-> None:
         super().__init__()
 
-        self.register_buffer("action_scale", (action_high - action_low) / 2.0 )
+        self.register_buffer("action_scale", (action_high - action_low) / 2.0)
         self.register_buffer("action_bias",  (action_high + action_low) / 2.0)
 
         dims = [input_dim] + hidden_dims + [output_dim]
@@ -242,26 +247,7 @@ class DualCritic(nn.Module):
 
 
 # ---- Utilities  ----
-def get_activation(activation: str) ->torch.nn.Module:
-    if activation == ACTIVATIONS[0]:
-        return nn.ReLU()
-    elif activation == ACTIVATIONS[1]:
-        return nn.Tanh()
-    elif activation == ACTIVATIONS[2]:
-        return nn.LeakyReLU()
-    else:
-        print(f"Err: Invalid activation function name: {activation}!")
-        exit()
 
-
-def build_network(dims: List[int], activations: List[str]) -> torch.nn.Module:
-    layers = []
-    for i, act in enumerate(activations):
-        layers.append(nn.Linear(dims[i], dims[i+1]))
-        if act is not None:
-            layers.append(get_activation(act))
-
-    return nn.Sequential(*layers)
 
 
 if __name__ == "__main__":

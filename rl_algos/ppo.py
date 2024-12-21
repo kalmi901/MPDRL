@@ -26,9 +26,11 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
          
 
 class PPO():
-    metadata = {"hyperparameters" : ["learning_rate", "gamma", "gae_lambda", "mini_batch_size", "clip_coef", "clip_vloss", "ent_coef", "vf_coef", "max_grad_norm",
+    metadata = {"hyperparameters" : ["pi_learning_rate", "vf_learning_rate", "ft_learning_rate", 
+                                     "gamma", "gae_lambda", "mini_batch_size", "clip_coef", "clip_vloss", "ent_coef", "vf_coef", "max_grad_norm",
                                      "target_kl", "norm_adv", "rollout_steps", "num_update_epochs", "gradient_steps",
-                                      "seed", "torch_deterministic", "cuda", "buffer_device"]}
+                                     "seed", "torch_deterministic", "cuda", "buffer_device", 
+                                     "policy_type", "hidden_dims", "activations", "shared_dims"]}
 
     default_net_arch = {
         "hidden_dims": [126, 84],
@@ -55,7 +57,8 @@ class PPO():
                  torch_deterministic: bool = True,
                  cuda: bool = True,
                  buffer_device: str = "cuda",
-                 net_archs: Dict = default_net_arch
+                 net_archs: Dict = default_net_arch,
+                 policy: str = "Beta",
                  ) -> None:
         
         # Seeding ------------------------
@@ -86,16 +89,31 @@ class PPO():
         self.buffer_device = buffer_device
 
         # Neural Networks ----------------------
-
+        self.policy_type = policy
+        self.hidden_dims = net_archs["hidden_dims"]
+        self.activations = net_archs["activations"]
+        self.shared_dims = net_archs["shared_dims"]
         action_high = venvs.single_action_space.high if isinstance(venvs.single_action_space.high, torch.Tensor) else torch.tensor(venvs.single_action_space.high)
         action_low  = venvs.single_action_space.low  if isinstance(venvs.single_action_space.low , torch.Tensor) else torch.tensor(venvs.single_action_space.low)
 
-        self.policy = ActorCriticBetaPolicy(
-            input_dim=np.array(venvs.single_observation_space.shape).prod(),
-            output_dim=np.prod(venvs.single_action_space.shape),
-            action_high=action_high,
-            action_low=action_low,
-            **net_archs).to(self.device)
+        if self.policy_type == "Gaussian":
+            self.policy = ActorCriticGaussianPolicy(
+                input_dim=np.array(venvs.single_observation_space.shape).prod(),
+                output_dim=np.prod(venvs.single_action_space.shape),
+                action_high=action_high,
+                action_low=action_low,
+                **net_archs).to(self.device)
+            
+        elif self.policy_type == "Beta":
+            self.policy = ActorCriticBetaPolicy(
+                input_dim=np.array(venvs.single_observation_space.shape).prod(),
+                output_dim=np.prod(venvs.single_action_space.shape),
+                action_high=action_high,
+                action_low=action_low,
+                **net_archs).to(self.device)
+        else:
+            print(f"Err: Policy {self.policy} is not a valid policy. Please Choose a valid policy `Beta` or `Gaussian`")
+            exit()
 
         # Optimizer
         self.optimizer = optim.AdamW(self.policy.parameters(), lr=self.learning_rate)
@@ -125,6 +143,7 @@ class PPO():
 
             global_step = 0     # timesteps
             num_updates = 0     # nn update
+            episodes    = 0
             train_loop  = 0     # number of training loops
             should_stop = False
             start_time = time.time()
@@ -149,10 +168,11 @@ class PPO():
                     real_next_obs = process_final_observation(next_obs, infos)
                     if 'final_observation' in infos.keys():                        
                         for idx in range(len(infos['dones'])):
-                            print(f"global_step={global_step}, episode_return={infos['episode_return'][idx]}")
+                            episodes += 1
+                            print(f"global_step={global_step}, episode_return={infos['episode_return'][idx]:0.3f}, episode_length={infos['episode_length'][idx]:0.0f}")
                             if log_data:
-                                writer.add_scalar("charts/episode_return", infos["episode_return"][idx], global_step)
-                                writer.add_scalar("charts/episode_length", infos["episode_length"][idx], global_step)
+                                writer.add_scalar("charts/episode_return", infos["episode_return"][idx], episodes)
+                                writer.add_scalar("charts/episode_length", infos["episode_length"][idx], episodes)
 
                     # Handle time-out --> add future value for the reward
                     idx = torch.where(time_outs)[0]
@@ -161,11 +181,12 @@ class PPO():
                         if len(idx) > 0:
                             rewards[idx] += (self.gamma * real_next_values[idx])
 
+                    # State transition
+                    dones = torch.logical_or(terminateds, time_outs)        # Trial trajectory ends
+                    
                     # Store transition to memory
                     self.memory.store_transition(step, obs, actions, logprobs, rewards, values.view(-1), dones)
 
-                    # State transition
-                    dones = torch.logical_or(terminateds, time_outs)        # Trial trajectory ends
                     global_step += self.num_envs
                     obs = next_obs.clone()
 
@@ -179,13 +200,12 @@ class PPO():
                 b_actions,      \
                 b_advantages,   \
                 b_returns,      \
-                b_values        = self.memory.sample()
-
-                # shullfe data
-                b_idx = torch.randperm(self.batch_size)
+                b_values, _     = self.memory.sample()
 
                 clipfracs = []
                 for _ in range(self.num_update_epochs):
+                    # shullfe data
+                    b_idx = torch.randperm(self.batch_size)
                     for idx0 in range(0, self.batch_size, self.mini_batch_size):
                         idxN = min(idx0 + self.mini_batch_size, self.batch_size)
                         mb_idx = b_idx[idx0:idxN]
@@ -193,7 +213,7 @@ class PPO():
 
                         # TODO: Handle discrete action space!
                         #if isinstance(self.venvs.single_action_space, Discrete):
-                        #    _, newlogprob, entropy, newvalue = self.policy.get_action_and_value(b_obs[mb_idx], b_actions.long()[mb_idx])
+                        #    _, newlogprob, entropy, newvalue = self.policy(b_obs[mb_idx], b_actions.long()[mb_idx])
 
                         _, newlogprob, entropy, newvalues = self.policy(b_obs[mb_idx], b_actions[mb_idx])
                         logratio = newlogprob - b_logprobs[mb_idx]
@@ -205,7 +225,7 @@ class PPO():
                             approx_kl = ((ratio - 1) - logratio).mean()
                             clipfracs += [((ratio - 1.0).abs() > self.clip_coef).float().mean().item()]
 
-                        # Normalize the advanteges
+                        # Normalize the advantages
                         mb_advantages = b_advantages[mb_idx]
                         if self.norm_adv:
                             mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
@@ -245,7 +265,7 @@ class PPO():
 
 
                 training_ends = time.time()
-                # Calculate the explaine variance
+                # Calculate the explained variance
                 y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
                 var_y = np.var(y_true) + 1.0e-12
                 explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y

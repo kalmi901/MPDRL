@@ -33,7 +33,7 @@ def parse_args():
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=2.5e-4,
         help="the learning rate of the optimizer")
-    parser.add_argument("--num-envs", type=int, default=32,
+    parser.add_argument("--num-envs", type=int, default=1,
         help="the number of parallel game environments")
     parser.add_argument("--gamma", type=float, default=0.99,
         help="the discount factor gamma")
@@ -83,8 +83,7 @@ if __name__ == "__main__":
     args = parse_args()
     project_name = args.wandb_project_name
     trial_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    log_dir =  os.path.join(WORK_DIR)
-
+    log_dir =  os.path.join(WORK_DIR, "wandb" if args.use_wandb else "runs")
 
     # env setup
     venvs = ModifiedSyncVectorEnv(
