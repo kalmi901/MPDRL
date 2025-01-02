@@ -1,5 +1,5 @@
 from settings import *
-from rl_algos import DDPG
+from rl_algos import RPPO
 from envs import Pos1B1D as Environment
 from envs import ActionSpaceDict, ObservationSpaceDict
 import time
@@ -7,17 +7,17 @@ import time
 
 # EXPERIMENT PROPERTIES
 PROJECT_NAME = "TestRuns"
-TRIAL_NAME   = f"DDPG_PA_CONTROL{int(time.time())}"
+TRIAL_NAME   = f"RPPO_PA_CONTROL{int(time.time())}"
 SAVE_WANDB   = False
 LOG_TRAINING = True
 LOG_FREQ     = 1
 SEED         = 42
 
 # Vectorizazion specific parameters ()
-POLICY_UPDATE_FREQ  = 1
-GRADIENT_STEPS      = 256
-ROLLOUT_STEPS       = 1 
+ROLLOUT_STEPS       = 32 
 NUM_ENVS            = 128
+NUM_UPDATE_EPOCHS   = 16
+MINI_BATCH_SIZE     = 256
 
 
 # ENVIRONMENT PROPERTIES ----
@@ -45,34 +45,39 @@ ACTION_SPACE = ActionSpaceDict(
 
 OBSERVATION_SPACE = ObservationSpaceDict(
     XT = {"IDX": [0], "MIN": [0.05], "MAX": [0.25], "TYPE": "Box"},
-    X  = {"IDX": [0], "MIN": [0.05], "MAX": [0.25], "TYPE": "Box", "STACK": 2}
+    X  = {"IDX": [0], "MIN": [0.05], "MAX": [0.25], "TYPE": "Box", "STACK": 1}
     )
 # The agent assumes the target position for bubble-0 is between 0.05 and 0.25 and
 # observe the bubble position values (x) where the interest region os between 0.05 and 0.25,
-# due to the partial observability of the full state space 2 position values are encoded into the observation
+# due to the partial observability RNN is used
 
 
 # HYPERPARAMETERS (DDPG)
-TOTAL_TIMESTEPS     = 500_000
-LEARNING_RATE       = 2.5e-4
-TAU                 = 0.005
+TOTAL_TIMESTEPS     = 5_000_000
+LEARNING_RATE       = 2.50e-4
 GAMMA               = 0.99
-BUFFER_SIZE         = 20_000
-BATTCH_SIZE         = 256
-EXPL_NOISE          = 0.1
-EXPL_DECAY          = 0.0
-NOISE_CLIP          = 0.25
-LEARNING_STARTS     = 1000
+GAE_LAMDA           = 0.90
+CLIP_COEF           = 0.2
+CLIP_VLOSS          = True
+ENT_COEF            = 0.01
+VF_COEF             = 0.5
 MAX_GRAD_NORM       = 0.5
+TARGET_KL           = None
+NORM_ADV            = True
+POLICY              = "Beta"        # "Gaussian" or "Beta"
+
 
 # Neural Networks
 NET_ARCHS = {
-    "pi": {
-        "hidden_dims" : [128, 128],
-        "activations" : ["Tanh", "Tanh"] },
-    "qf": {
-        "hidden_dims" : [128, 128],
-        "activations" : ["Tanh", "Tanh"] } }
+    "hidden_dims"       : [128],
+    "activations"       : ["ReLU"],
+    "shared_dims"       : 0,
+    "num_rnn_layers"    : 1,
+    "rnn_hidden_size"   : 128,
+    "rnn_type"          : "LSTM",   #
+    "shared_rnn"        : True,
+    "enable_critic_rnn" : True }
+
 
 
 def train():
@@ -94,25 +99,26 @@ def train():
     )
 
 
-    model = DDPG(
+    model = RPPO(
         venvs=venvs,
         learning_rate=LEARNING_RATE,
         gamma=GAMMA,
-        tau=TAU,
-        buffer_size=BUFFER_SIZE,
-        batch_size=BATTCH_SIZE,
-        exploration_noise=EXPL_NOISE,
-        exploration_decay_rate=EXPL_DECAY,
-        learning_starts=LEARNING_STARTS,
-        policy_frequency=POLICY_UPDATE_FREQ,
+        gae_lambda=GAE_LAMDA,
+        mini_batch_size=MINI_BATCH_SIZE,
+        clip_coef = CLIP_COEF, 
+        clip_vloss = CLIP_VLOSS,
+        ent_coef = ENT_COEF,
+        vf_coef = VF_COEF,
+        max_grad_norm = MAX_GRAD_NORM,
+        target_kl = TARGET_KL,
+        norm_adv = NORM_ADV,
         rollout_steps=ROLLOUT_STEPS,
-        gradient_steps=GRADIENT_STEPS,
-        noise_clip=NOISE_CLIP,
-        storage_device="cuda",
+        num_update_epochs=NUM_UPDATE_EPOCHS,
         cuda=True,
         torch_deterministic=True,
         seed=SEED,
-        net_archs=NET_ARCHS
+        net_archs=NET_ARCHS,
+        policy='Beta'
     )
 
 

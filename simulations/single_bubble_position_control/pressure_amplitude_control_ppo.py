@@ -14,9 +14,9 @@ LOG_FREQ     = 1
 SEED         = 42
 
 # Vectorizazion specific parameters ()
-ROLLOUT_STEPS       = 24 
-NUM_ENVS            = 512
-NUM_UPDATE_EPOCHS   = 80
+ROLLOUT_STEPS       = 32 
+NUM_ENVS            = 128
+NUM_UPDATE_EPOCHS   = 16 
 MINI_BATCH_SIZE     = 256
 
 
@@ -30,8 +30,8 @@ PRESSURE_AMPLITUDE      = [0.0, 0.0]        # [bar] - initialized with unexcited
 
 # STATIC FEATURES 
 EQUILIBRIUM_RADIUS      = 60.0              # [micron] - the present implementation suppors fixed value
-TIME_STEP_LENGTH        = 5                 # number acoustic cycles per action
-MAX_STEPS_PER_EPISODE   = 100               # number actions per episode
+TIME_STEP_LENGTH        = 10                # number acoustic cycles per action
+MAX_STEPS_PER_EPISODE   = 128               # number actions per episode
 INITIAL_POSITION        = "random"           
 TARGET_POSITION         = "random"
 APPLY_TERMINATION       = True              # Halt the environment if distance is less than the tolerace
@@ -57,10 +57,10 @@ TOTAL_TIMESTEPS     = 5_000_000
 LEARNING_RATE       = 2.50e-4
 GAMMA               = 0.99
 GAE_LAMDA           = 0.90
-CLIP_COEF           = 0.5
+CLIP_COEF           = 0.2
 CLIP_VLOSS          = True
-ENT_COEF            = 0.05
-VF_COEF             = 4.0
+ENT_COEF            = 0.01
+VF_COEF             = 0.5
 MAX_GRAD_NORM       = 0.5
 TARGET_KL           = None
 NORM_ADV            = True
@@ -69,7 +69,7 @@ POLICY              = "Beta"        # "Gaussian" or "Beta"
 
 # Neural Networks
 NET_ARCHS = {
-    "hidden_dims": [256, 256],
+    "hidden_dims": [128, 128],
     "activations": ["ReLU", "ReLU"],
     "shared_dims": 0}
 

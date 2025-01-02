@@ -346,9 +346,9 @@ class Pos1B1D(BubbleGPUEnv):
         
         target_distance = abs(self.bubble_positions() - self.target_positions())
 
-        self._rewards = 1 - (target_distance / max_distance)**0.2   \
-                       -100 * self._negative_terminal  \
-                       +100 * self._positive_terminal
+        self._rewards = 0 - (target_distance / max_distance)**0.5   \
+                       -10 * self._negative_terminal  \
+                       +10 * self._positive_terminal
 
     def _termination_and_truncation(self):
         self._negative_terminal = (torch.tensor(self.solver.status(), device="cuda") != 0).squeeze()      # Ode solver failure
