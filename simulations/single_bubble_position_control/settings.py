@@ -7,3 +7,4 @@ WORK_DIR = os.path.join(ROOT_DIR, "single_bubble_position_control")
 
 LOG_DIR   = os.path.join(WORK_DIR, "runs")
 MODEL_DIR = os.path.join(WORK_DIR, "models")
+STAT_DIR  = os.path.join(WORK_DIR, "statistics") 

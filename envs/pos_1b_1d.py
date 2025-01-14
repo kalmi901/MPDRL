@@ -40,7 +40,8 @@ class Pos1B1D(BubbleGPUEnv):
                  target_position: Union[str, float] = "random",
                  initial_position: Union[str, float] = "random",
                  position_tolerace: float = 1e-2,
-                 apply_termination: bool = True) -> None:
+                 apply_termination: bool = True,
+                 render_env: bool = False) -> None:
 
         # Update Global Dictionaries
         super().__init__(num_envs=num_envs,
@@ -77,6 +78,8 @@ class Pos1B1D(BubbleGPUEnv):
 
         self.position_tolerance = position_tolerace
         self.apply_termination  = apply_termination
+
+        self.render_env = render_env
 
         # Configure Solver Object ---------------------------------------
         if ac_type not in ["CONST", "SW_N", "SW_A"]: 
@@ -130,17 +133,6 @@ class Pos1B1D(BubbleGPUEnv):
             target_positions = torch.full(size=(self.num_envs, ), fill_value=self.target_position, dtype=torch.float32, device="cuda").contiguous()
         else:
             print("Err: target bubble position is not created!")
-
-
-        # Handle overlap
-        random_values = torch.rand(bubble_positions.shape, dtype=torch.float32, device="cuda") * (2*self.position_tolerance) + self.position_tolerance
-        signs = torch.randint(0, 2, bubble_positions.shape, dtype=torch.float32, device="cuda") * 2 - 1 
-        random_values *= signs  
-
-        # Maszk létrehozása a feltétel alapján
-        mask = torch.abs(bubble_positions - target_positions) <= self.position_tolerance
-
-        bubble_positions = bubble_positions + mask * random_values
 
         if "XT" in self.observed_variables.keys():
             for _ in range(self.observed_variables["XT"]["len"]):
@@ -204,17 +196,6 @@ class Pos1B1D(BubbleGPUEnv):
             print("Err: target bubble position is not created!")
 
 
-        # Handle overlap
-        random_values = torch.rand(bubble_positions.shape, dtype=torch.float32, device="cuda") * (2*self.position_tolerance) + self.position_tolerance
-        signs = torch.randint(0, 2, bubble_positions.shape, dtype=torch.float32, device="cuda") * 2 - 1 
-        random_values *= signs  
-
-        # Maszk létrehozása a feltétel alapján
-        mask = torch.abs(bubble_positions - target_positions) <= self.position_tolerance
-
-        bubble_positions = bubble_positions + mask * random_values
-
-
         for i, tid in enumerate(env_ids):
             if "XT" in self.observed_variables.keys():
                 for j in range(self.observed_variables["XT"]["len"]):
@@ -269,6 +250,10 @@ class Pos1B1D(BubbleGPUEnv):
         self._get_rewards()
         self.total_rewards += self._rewards
 
+        # --- Render Env ----
+        if self.render_env:
+            self.render()
+
         # --- Handle final observation 
         info = {}
         #print(self._time_out)
@@ -295,9 +280,6 @@ class Pos1B1D(BubbleGPUEnv):
 
               
     def render(self):
-        target   = self._observation[:,0].detach().cpu().numpy()
-        position0 = self._observation[:,1].detach().cpu().numpy()
-        position1 = self._observation[:,2].detach().cpu().numpy()
         try:
             ax0 = self.fig.axes[0]
             ax1 = self.fig.axes[1]
@@ -311,19 +293,19 @@ class Pos1B1D(BubbleGPUEnv):
             ax1 = self.fig.add_subplot(3, 1, 2)
             ax2 = self.fig.add_subplot(3, 1, 3)
         finally:
-            ax0.plot([id for id in range(self.num_envs)], target,   "g.", markersize=10)
-            ax0.plot([id for id in range(self.num_envs)], position0, "b.", markersize=10)
-            ax0.plot([id for id in range(self.num_envs)], position1, "r.", markersize=10)
-            ax0.set_ylim(-0.015, 0.25+0.015)     # TODO: 
+            ax0.plot([id for id in range(self.num_envs)], self.target_positions().cpu().numpy(), "g+", markersize=10)
+            ax0.plot([id for id in range(self.num_envs)], self.bubble_positions().cpu().numpy(), "k.", markersize=10)
+            #ax0.plot([id for id in range(self.num_envs)], position1, "r.", markersize=5)
+            ax0.set_ylim(-0.05, 0.35)     # TODO: 
             ax0.set_xlabel(r"Environment")
             ax0.set_ylabel(r"$x/\lambda_r$")
             ax0.grid("both")
 
 
-            ax1.plot([id for id in range(self.num_envs)], self._actions.cpu().numpy(), "b.", markersize=10)
+            ax1.plot([id for id in range(self.num_envs)], self._actions.cpu().numpy(), ".", markersize=5)
             ax1.set_ylim(0, 2)
 
-            ax2.plot([id for id in range(self.num_envs)], self._rewards.cpu().numpy(), "b.", markersize=10)
+            ax2.plot([id for id in range(self.num_envs)], self._rewards.cpu().numpy(), "k.", markersize=5)
 
             plt.draw()
             plt.show(block=False)
@@ -346,7 +328,7 @@ class Pos1B1D(BubbleGPUEnv):
         
         target_distance = abs(self.bubble_positions() - self.target_positions())
 
-        self._rewards = 0 - (target_distance / max_distance)**0.5   \
+        self._rewards = - (target_distance / max_distance)**0.5   \
                        -10 * self._negative_terminal  \
                        +10 * self._positive_terminal
 
@@ -385,7 +367,7 @@ class Pos1B1D(BubbleGPUEnv):
         if self.action_space_dict.PS is not None:
             k = self.components*2
             for idx in self.action_space_dict.PS["IDX"]:
-                self.solver.set_device_array("dynamic_parameters", idx+k, action[:,shift+idx].contiguous().to(dtype=torch.float64))
+                self.solver.set_device_array("dynamic_parameters", idx+k, action[:,shift+idx].contiguous().to(dtype=torch.float64) * torch.pi)
         if self.action_space_dict.FR is not None:
             pass
 

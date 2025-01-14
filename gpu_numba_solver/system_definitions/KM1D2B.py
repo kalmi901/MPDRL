@@ -34,7 +34,7 @@ DEFAULT_MAT_PROPS = {
 
 # Equation Properties (Default values in SI Units
 DEFAULT_EQ_PROPS = {
-    "k"     : 1,                        # Number of Harmonic Components
+    "k"     : 2,                        # Number of Harmonic Components
     "R0"    : [44.8*1e-6, 44.8*1e-6],   # Equilibrium Radius (micron)
     "FREQ"  : [25.0*1e3, 50.0*1e3],     # Excitation frequencies (Hz)       
     "PA"    : [0.8*0e5, 0.0*1e5],       # Pressure Amplotude (bar)
@@ -216,8 +216,9 @@ def setup(k=DEFAULT_EQ_PROPS["k"], ac_field="CONST"):
 @cuda.jit(nb.void(nb.int32, nb.float64, nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:]), device=True, inline=True)
 def per_thread_finalization(tid, t, td, x, acc, cp, dp, sp):
     # Increase the time domain by dt
-    td[0] = t
-    td[1] += 1.0
+    dt = td[1] - td[0]
+    td[0] += 1.0 * dt
+    td[1] += 1.0 * dt
 
 
 # -------------- EVENTS ---------------

@@ -23,9 +23,10 @@ wandb
 wandb/*
 gpu_numba_solver/system_definitions/__pycache__
 gpu_numba_solver/system_definitions/__pycache__/*
-paramteter_study/__pycache__
-paramteter_study/__pycache__/*
-paramteter_study/data_repository/*
+parameter_study/*
+parameter_study/__pycache__
+parameter_study/__pycache__/*
+parameter_study/data_repository/*
 simulations/__pycache__
 simulations/__pycache__/*
 simulations/single_bubble_position_control/__pycache__
@@ -35,6 +36,9 @@ simulations/single_bubble_position_control/runs/*
 simulations/single_bubble_position_control/wandb
 simulations/single_bubble_position_control/wandb/*
 simulations/single_bubble_position_control/models
+simple_models/single_bubble_position_control/models/*
+simulations/single_bubble_position_control/statistics
+simulations/single_bubble_position_control/statistics/*
 simulations/single_bubble_position_control/models/*
 simulations/dual_bubble_position_control/__pycache__
 simulations/dual_bubble_position_control/__pycache__/*
@@ -44,4 +48,6 @@ simulations/dual_bubble_position_control/wandb
 simulations/dual_bubble_position_control/wandb/*
 simulations/dual_bubble_position_control/models
 simulations/dual_bubble_position_control/models/*
+simulations/dual_bubble_position_control/statistics
+simulations/dual_bubble_position_control/statistics/*
 

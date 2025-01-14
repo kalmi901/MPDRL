@@ -5,7 +5,8 @@ import torch.optim as optim
 
 import time
 import numpy as np
-from typing import Dict, Any
+from pandas import DataFrame as df
+from typing import Dict, Any, Union
 
 
 try:
@@ -140,12 +141,16 @@ class DDPG():
                                 self.storage_device)      
 
 
-    def save_model(self, save_fname: str):
+    def save_model(self, save_fname: str, save_dir: Union[str, None] = None):
+        if save_dir is not None:
+            save_fname = f"{save_dir}/{save_fname}"
         torch.save(self.pi.state_dict(), save_fname+"_actor.th")
         torch.save(self.qf.state_dict(), save_fname+"_critic.th")
 
-    def load_model(self, load_fname: str):
+    def load_model(self, load_fname: str, load_dir: Union[str, None] = None):
         # TODO: Handle exceptions
+        if load_dir is not None:
+            load_fname = f"{load_dir}/{load_fname}"
         loaded_actor_state_dict = torch.load(load_fname+"_actor.th")
         loaded_critic_state_dict = torch.load(load_fname+"_critic.th")
         self.pi.load_state_dict(loaded_actor_state_dict)
@@ -153,18 +158,59 @@ class DDPG():
         self.qf.load_state_dict(loaded_critic_state_dict)
         self.qf_target.load_state_dict(loaded_critic_state_dict)
 
-    def predict(self, total_timesteps: int):
+    def predict(self, total_timesteps: Union[int, None] = None, total_episodes: Union[int, None] = None, save_dir: Union[str, None] = None, stat_fname: Union[str, None] = None):
+        assert total_timesteps is None or total_episodes is None, "Err, set 'total_timesteps' or 'total_episodes'"
         try:
             obs, _ = self.venvs.reset(seed=self.seed)
-            for global_step in range(0, total_timesteps, self.num_envs):
+            global_step = 0
+            episodes = 0
+            episode_returns, episode_lengths = [], []
+            while True:
                 with torch.no_grad():
                     actions = self.pi(obs)
                 obs, _, _, _, infos = self.venvs.step(actions)
                 
                 if 'final_observation' in infos.keys():                        
                     for idx in range(len(infos['dones'])):
+                        episodes +=1
                         print(f"global_step={global_step}, episode_return={infos['episode_return'][idx]}")
-        
+                        # Collect episode statistics
+                        episode_returns.append(infos['episode_return'][idx].item())
+                        episode_lengths.append(infos["episode_length"][idx].item())
+
+                global_step += self.num_envs        
+                # Check for simulation ends
+                if total_episodes is not None:
+                    if episodes >= total_episodes:
+                        break
+                else:
+                    if global_step > total_timesteps:
+                        break
+
+            # ------- Save Statistics ---------
+            if len(episode_returns) > 0 and len(episode_lengths) > 0:
+                episode_returns = np.array(episode_returns, dtype=np.float32)
+                episode_lengths = np.array(episode_lengths, dtype=np.float32)
+                avg_return = np.mean(episode_returns)
+                std_return = np.std(episode_returns)
+                avg_length = np.mean(episode_lengths)
+                std_length = np.std(episode_lengths)
+
+                print("-------------------------------------------")
+                print(f"Number of Episodes: {len(episode_returns):.0f}")
+                print(f"Episode Returns: {avg_return:.3f}+/-{std_return:.3f}")
+                print(f"Episode Lengths: {avg_length:.3f}+/-{std_length:.3f}")
+                print("-------------------------------------------")
+
+                # -------- Save Data to CSV --------------
+                if stat_fname is not None:
+                    if save_dir is not None:
+                        stat_fname = f"{save_dir}/{stat_fname}.csv"
+                    df({
+                        "episode_returns": episode_returns,
+                        "episode_lengths": episode_lengths
+                    }).to_csv(stat_fname, index=False)
+
         except KeyboardInterrupt:
             pass
         finally:            

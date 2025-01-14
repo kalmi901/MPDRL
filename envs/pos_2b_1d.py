@@ -22,30 +22,32 @@ SOLVER_OPTS = DEFAULT_SOLVER_OPTS.copy()
 class Pos2B1D(BubbleGPUEnv):
     def __init__(self, 
                  num_envs: int = 1,
-                 R0: List[float] = [60.0, 60.0],
-                 components: int = 1,
-                 ac_type: str = "SW_N",
-                 freqs: List[float] = [25.0],
-                 pa: List[float] = [1.0],
-                 phase_shift : List[float] = [0.0], 
-                 action_space_dict: ActionSpaceDict = ActionSpaceDict({"IDX": [0], "MIN": [0.0], "MAX": [1.5], "TYPE": "Box"},
-                                                                      {"IDX": [0], "MIN": [0.0], "MAX": [0.25*torch.pi], "TYPE": "Box"}), 
-                 observation_space_dict: ObservationSpaceDict = ObservationSpaceDict(XT = {"IDX": [0], "MIN": [0.0], "MAX": [0.25], "TYPE": "Box"},
-                                                                                      X = {"IDX": [0, 1], "MIN": [-0.5, -0.5], "MAX": [0.5, 0.5], "TYPE": "Box", "STACK": 2} ),
+                 R0: List[float] = [40.0, 40.0],
+                 components: int = 2,
+                 ac_type: str = "SW_A",
+                 freqs: List[float] = [25.0, 50.0],
+                 pa: List[float] = [1.0, 0.0],
+                 phase_shift : List[float] = [0.0, 0.0], 
+                 action_space_dict: ActionSpaceDict = ActionSpaceDict({"IDX": [0, 1], "MIN": [0.0, 0.0], "MAX": [ 1.0,  1.0], "TYPE": "Box"},
+                                                                      {"IDX": [0, 1], "MIN": [0.0, 0.0], "MAX": [0.25, 0.25], "TYPE": "Box"}), 
+                 observation_space_dict: ObservationSpaceDict = ObservationSpaceDict(XT = {"IDX": [0, 1], "MIN": [-0.25, -0.25], "MAX": [0.25, 0.25], "TYPE": "Box"},
+                                                                                      X = {"IDX": [0, 1], "MIN": [-0.25, -0.25], "MAX": [0.25, 0.25], "TYPE": "Box", "STACK": 2} ),
                  rel_freq: Optional[float] = None,
                  episode_length: int = 100,
                  time_step_length: Union[int, float] = 10,
                  seed: int = None,
                  target_position: Union[str, float] = "random",
                  initial_position: Union[str, float] = "random",
+                 initial_distace: Union[str, float] = "random",
+                 final_distance: Union[str, float] = "random",
                  min_distance: float = 0.1,
                  max_distance: float = 0.25,
                  position_tolerance: float = 0.01,
                  apply_termination: bool = True,
-                 reward_weight: List[float] = [0.5, 0.25, 0.25],
-                 reward_exp: float = 0.3,
-                 positive_terminal_reward: float = 100.0,
-                 negative_terminal_reward: float = -100.0,
+                 reward_weight: List[float] = [1.0, 0.0],
+                 reward_exp: float = 0.5,
+                 positive_terminal_reward: float = 10.0,
+                 negative_terminal_reward: float = -10.0,
                  render_env: bool = False) -> None:
         
         # Update Global Dictionaries
@@ -79,6 +81,10 @@ class Pos2B1D(BubbleGPUEnv):
         self.target_position = target_position
         assert (initial_position == "random" or type(initial_position) in [float, int]), "Err target_position = 'random' or float number"
         self.initial_position = initial_position
+        assert (initial_distace == "random" or type(initial_distace) in [float, int]), "Err initial_distance = 'random' or float number"
+        self.initial_distance = initial_distace
+        assert (final_distance == "random" or type(final_distance) in [float, int]), "Err final_distance = 'random' or float number"
+        self.final_distance = final_distance
 
         self.position_tolerance = position_tolerance
         self.apply_termination  = apply_termination
@@ -142,28 +148,50 @@ class Pos2B1D(BubbleGPUEnv):
         else:
             print("Err: bubble positions are not initialized!")
 
-        distance = torch.rand(size=(self.num_envs, ), dtype=torch.float32, device="cuda").contiguous() \
-                    * (2*self.max_distance - self.min_distance) + self.min_distance
+        if (self.initial_distance == "random"):
+            distance = torch.rand(size=(self.num_envs, ), dtype=torch.float32, device="cuda").contiguous() \
+                        * (self.max_distance - self.min_distance) + self.min_distance
+        
+        elif type(self.initial_distance) in [float, int]:
+            distance = torch.full(size=(self.num_envs,), fill_value=self.initial_distance, dtype=torch.float32, device="cuda").contiguous()
+        
+        else: 
+            print("Err: bubble distances are not initialized")
 
         bubble_pos_0 = torch.clamp((mean_postion - 0.5*distance), self.observation_space_dict.X["MIN"][0], self.observation_space_dict.X["MAX"][0])
-        bubble_pos_1 = torch.clamp((bubble_pos_0 + 1.0*distance), self.observation_space_dict.X["MIN"][1], self.observation_space_dict.X["MAX"][1])
+        bubble_pos_1 = torch.clamp((mean_postion + 0.5*distance), self.observation_space_dict.X["MIN"][1], self.observation_space_dict.X["MAX"][1])
 
         if (self.target_position == "random"):
-            target_positions = torch.rand(size=(self.num_envs, ), dtype=torch.float32, device="cuda").contiguous() \
+            mean_target_position = torch.rand(size=(self.num_envs, ), dtype=torch.float32, device="cuda").contiguous() \
                 * (self.observation_space_dict.XT["MAX"][0] - self.observation_space_dict.XT["MIN"][0] ) + self.observation_space_dict.XT["MIN"][0]    
 
         elif type(self.target_position) in [float, int]:
-            target_positions = torch.full(size=(self.num_envs, ), fill_value=self.target_position, dtype=torch.float32, device="cuda").contiguous()
+            mean_target_position = torch.full(size=(self.num_envs, ), fill_value=self.target_position, dtype=torch.float32, device="cuda").contiguous()
         
         else:
             print("Err: target position is not initialized!")
 
+        if (self.final_distance == "random"):
+            final_distance = torch.rand(size=(self.num_envs, ), dtype=torch.float32, device="cuda").contiguous() \
+                        * (self.max_distance - self.min_distance) + self.min_distance
+        
+        elif type(self.final_distance) in [float, int]:
+            final_distance = torch.full(size=(self.num_envs,), fill_value=self.final_distance, dtype=torch.float32, device="cuda").contiguous()
+
+        else:
+            print("Err: final distance is not initialized!")
+
+        target_position_0 = torch.clamp((mean_target_position - 0.5*final_distance), self.observation_space_dict.XT["MIN"][0], self.observation_space_dict.XT["MAX"][0])
+        target_position_1 = torch.clamp((mean_target_position + 0.5*final_distance), self.observation_space_dict.XT["MIN"][1], self.observation_space_dict.XT["MAX"][1])
 
         # ----  Initialize first observation!
-        if "XT" in self.observed_variables.keys():
-            for _ in range(self.observed_variables["XT"]["len"]):
-                self.observed_variables["XT"]["values"].appendleft(target_positions.clone())
+        if "XT_0" in self.observed_variables.keys():
+            for _ in range(self.observed_variables["XT_0"]["len"]):
+                self.observed_variables["XT_0"]["values"].appendleft(target_position_0.clone())
 
+        if "XT_1" in self.observed_variables.keys():
+            for _ in range(self.observed_variables["XT_1"]["len"]):
+                self.observed_variables["XT_1"]["values"].appendleft(target_position_1.clone())
 
         if "X_0" in self.observed_variables.keys():
             for _ in range(self.observed_variables["X_0"]["len"]):
@@ -220,26 +248,51 @@ class Pos2B1D(BubbleGPUEnv):
         else:
             print("Err: bubble positions are not initialized!")
 
-        distance = torch.rand(size=(num_envs, ), dtype=torch.float32, device="cuda").contiguous() \
-                    * (2*self.max_distance - self.min_distance) + self.min_distance
+        if (self.initial_distance == "random"):
+            distance = torch.rand(size=(num_envs, ), dtype=torch.float32, device="cuda").contiguous() \
+                        * (self.max_distance - self.min_distance) + self.min_distance
+            
+        elif type(self.initial_distance) in [float, int]:
+            distance = torch.full(size=(num_envs,), fill_value=self.initial_distance, dtype=torch.float32, device="cuda").contiguous()
+        
+        else:
+            print("Err: bubble distances are not initialized")
 
         bubble_pos_0 = torch.clamp((mean_postion - 0.5*distance), self.observation_space_dict.X["MIN"][0], self.observation_space_dict.X["MAX"][0])
-        bubble_pos_1 = torch.clamp((bubble_pos_0 + 1.0*distance), self.observation_space_dict.X["MIN"][1], self.observation_space_dict.X["MAX"][1])
+        bubble_pos_1 = torch.clamp((mean_postion + 0.5*distance), self.observation_space_dict.X["MIN"][1], self.observation_space_dict.X["MAX"][1])
 
         if (self.target_position == "random"):
-            target_positions = torch.rand(size=(num_envs, ), dtype=torch.float32, device="cuda").contiguous() \
+            mean_target_position = torch.rand(size=(num_envs, ), dtype=torch.float32, device="cuda").contiguous() \
                 * (self.observation_space_dict.XT["MAX"][0] - self.observation_space_dict.XT["MIN"][0] ) + self.observation_space_dict.XT["MIN"][0]    
 
         elif type(self.target_position) in [float, int]:
-            target_positions = torch.full(size=(num_envs, ), fill_value=self.target_position, dtype=torch.float32, device="cuda").contiguous()
+            mean_target_position = torch.full(size=(num_envs, ), fill_value=self.target_position, dtype=torch.float32, device="cuda").contiguous()
         
         else:
             print("Err: target position is not initialized!")
 
+        
+        if (self.final_distance == "random"):
+            final_distance = torch.rand(size=(num_envs, ), dtype=torch.float32, device="cuda").contiguous() \
+                        * (self.max_distance - self.min_distance) + self.min_distance
+        
+        elif type(self.final_distance) in [float, int]:
+            final_distance = torch.full(size=(num_envs,), fill_value=self.final_distance, dtype=torch.float32, device="cuda").contiguous()
+
+        else:
+            print("Err: final distance is not initialized!")
+
+        target_position_0 = torch.clamp((mean_target_position - 0.5*final_distance), self.observation_space_dict.XT["MIN"][0], self.observation_space_dict.XT["MAX"][0])
+        target_position_1 = torch.clamp((mean_target_position + 0.5*final_distance), self.observation_space_dict.XT["MIN"][1], self.observation_space_dict.XT["MAX"][1])
+
         for i, tid in enumerate(env_ids):
-            if "XT" in self.observed_variables.keys():
-                for j in range(self.observed_variables["XT"]["len"]):
-                    self.observed_variables["XT"]["values"][j][tid] = target_positions[i]
+            if "XT_0" in self.observed_variables.keys():
+                for j in range(self.observed_variables["XT_0"]["len"]):
+                    self.observed_variables["XT_0"]["values"][j][tid] = target_position_0[i]
+
+            if "XT_1" in self.observed_variables.keys():
+                for j in range(self.observed_variables["XT_1"]["len"]):
+                    self.observed_variables["XT_1"]["values"][j][tid] = target_position_1[i]
 
             if "X_0" in self.observed_variables.keys():
                 for j in range(self.observed_variables["X_0"]["len"]):
@@ -321,10 +374,10 @@ class Pos2B1D(BubbleGPUEnv):
 
 
     def render(self):
-        target = self.observed_variables["XT"]["values"][0].detach().cpu().numpy()
+        target_0 = self.observed_variables["XT_0"]["values"][0].detach().cpu().numpy()
+        target_1 = self.observed_variables["XT_1"]["values"][0].detach().cpu().numpy()
         bubble_pos0 = self.observed_variables["X_0"]["values"][0].detach().cpu().numpy()
         bubble_pos1 = self.observed_variables["X_1"]["values"][0].detach().cpu().numpy()
-        mean_pos = 0.5 * (bubble_pos0 + bubble_pos1)
 
         try:
             ax0 = self.fig.axes[0]
@@ -339,10 +392,10 @@ class Pos2B1D(BubbleGPUEnv):
             ax1 = self.fig.add_subplot(3, 1, 2)
             ax2 = self.fig.add_subplot(3, 1, 3)
         finally:
-            ax0.plot([id for id in range(self.num_envs)], target,   "g+", markersize=4)
-            ax0.plot([id for id in range(self.num_envs)], mean_pos,   "r+", markersize=4)
-            ax0.plot([id for id in range(self.num_envs)], bubble_pos0, "k.", markersize=10)
-            ax0.plot([id for id in range(self.num_envs)], bubble_pos1, "k.", markersize=10)
+            ax0.plot([id for id in range(self.num_envs)], target_0,   "g+", markersize=10)
+            ax0.plot([id for id in range(self.num_envs)], target_1,   "b+", markersize=10)
+            ax0.plot([id for id in range(self.num_envs)], bubble_pos0, "g.", markersize=10)
+            ax0.plot([id for id in range(self.num_envs)], bubble_pos1, "b.", markersize=10)
             ax0.set_ylim(-0.26, 0.26)     # TODO: 
             ax0.set_xlabel(r"Environment")
             ax0.set_ylabel(r"$x/\lambda_r$")
@@ -360,39 +413,52 @@ class Pos2B1D(BubbleGPUEnv):
 
 
     def target_positions(self):
-        return self.observed_variables["XT"]["values"][0]
+        return torch.vstack((self.observed_variables["XT_0"]["values"][0], self.observed_variables["XT_1"]["values"][0]))
+    
+    def bubble_positions(self):
+        return torch.vstack((self.observed_variables["X_0"]["values"][0], self.observed_variables["X_1"]["values"][0]))
 
     def mean_positions(self):
-        return 0.5 * (self.observed_variables["X_1"]["values"][0] + self.observed_variables["X_0"]["values"][0])
+        return 0.5 * (self.observed_variables["X_0"]["values"][0] + self.observed_variables["X_1"]["values"][0])
 
-    def distance(self):
-        return torch.abs(self.observed_variables["X_1"]["values"][0] - self.observed_variables["X_0"]["values"][0])
+    def target_distance(self):
+        return torch.abs(self.target_positions() - self.bubble_positions())
 
 
     # ------------- Environment's private methods -----------------
     def _get_rewards(self):
         
-        max_distance    = self.observation_space_dict.XT["MAX"][0] - self.observation_space_dict.XT["MIN"][0] 
+       """ max_distance    = self.observation_space_dict.XT["MAX"][0] - self.observation_space_dict.XT["MIN"][0] 
         target_distance = torch.abs(self.mean_positions() - self.target_positions())
         bubble_distance = self.distance()
         pa_idx = self.action_space_dict.PA["IDX"]
         intesity = torch.sum(self._actions[:, pa_idx], axis=1)**0.5
 
-        self._rewards = 1.0 - self.w[0] * (target_distance / max_distance)**self.b   \
+        self._rewards = - self.w[0] * (target_distance / max_distance)**self.b   \
                         - self.w[1] * (  torch.max(torch.zeros_like(bubble_distance), self.min_distance - bubble_distance)
                                        + torch.max(torch.zeros_like(bubble_distance), bubble_distance - self.max_distance) ) / self.max_distance \
                         - self.w[2] * intesity \
                         +self.negative_terminal_reward * self._negative_terminal \
                         +self.positive_terminal_reward * self._positive_terminal
 
+        """
+       distance_norm = (max(self.observation_space_dict.X["MAX"]) - min(self.observation_space_dict.X["MIN"])) * 0.5
+       target_distance = self.target_distance()
+       #self._rewards =  torch.full((self.num_envs, ), fill_value=-1.0, dtype=torch.float32, device="cuda")
+
+       pa_idx = self.action_space_dict.PA["IDX"]
+       intesity = torch.sum(self._actions[:, pa_idx], axis=1)**0.5
+       self._rewards = - self.w[0] * torch.sum((target_distance / distance_norm)** self.b, dim=0) * 0.5 \
+                       - self.w[1] * intesity \
+                       + self.negative_terminal_reward * self._negative_terminal \
+                       + self.positive_terminal_reward * self._positive_terminal
 
         
 
     def _termination_and_truncation(self):
         self._negative_terminal = (torch.tensor(self.solver.status(), device="cuda") != 0).squeeze() 
-
         if self.apply_termination:
-            self._positive_terminal = abs(self.mean_positions() - self.target_positions()) < self.position_tolerance
+            self._positive_terminal = torch.all(self.target_distance() <= self.position_tolerance, dim=0)
         else:
             self._positive_terminal = torch.full_like(self._negative_terminal, False)
 
@@ -405,7 +471,7 @@ class Pos2B1D(BubbleGPUEnv):
             for i in range(obs["len"]):
                 observation.append(obs["values"][i].unsqueeze(1))
 
-        self._observation = self.observation_space.normalize(torch.hstack(observation))
+        self._observation = self.observation_space.scale(torch.hstack(observation))
 
     # ------------- Solver - ENV Interface -----------------------
     def _observe_environment(self):
@@ -425,7 +491,7 @@ class Pos2B1D(BubbleGPUEnv):
         if self.action_space_dict.PS is not None:
             k = self.components*2
             for idx in self.action_space_dict.PS["IDX"]:
-                self.solver.set_device_array("dynamic_parameters", idx+k, action[:, shift+idx].contiguous().to(dtype=torch.float64))
+                self.solver.set_device_array("dynamic_parameters", idx+k, action[:, shift+idx].contiguous().to(dtype=torch.float64) * torch.pi)
         if self.action_space_dict.FR is not None:
             pass
 

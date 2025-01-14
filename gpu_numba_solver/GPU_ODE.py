@@ -222,11 +222,11 @@ class SolverObject():
             elif property == "actual_state":
                 return self._d_actual_state[idx0:idxN]
             elif property == "control_parameters":
-                pass
+                return self._d_control_parameters[idx0:idxN]
             elif property == "dynamic_parameters":
                 return self._d_dynamic_parameters[idx0:idxN]
             elif property == "accessories":
-                pass
+                return self._d_accessories[idx0:idxN]
         
             
 
@@ -315,7 +315,24 @@ class SolverObject():
         else:
             print("Error: GetHost")
             return None
-        
+
+    def get_host_array(self, property: str, index: int):
+        if property == "shared_parameters":
+            return self._h_shared_parameters
+        else:
+            idx0 = index * self._number_of_threads
+            idxN = idx0  + self._number_of_threads
+            if property == "time_domain":
+                pass
+            elif property == "actual_state":
+                return self._h_actual_state[idx0:idxN]
+            elif property == "control_parameters":
+                return self._h_control_parameters[idx0:idxN]
+            elif property == "dynamic_parameters":
+                return self._h_dynamic_parameters[idx0:idxN]
+            elif property == "accessories":
+                return self._h_accessories[idx0:idxN]
+
     def get_shared_host(self, property: str, index):
         if property == "shared_parameters":
             return self._h_shared_parameters[index]
