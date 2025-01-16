@@ -16,10 +16,10 @@ RENDER_ENV   = False
 
 
 # Vectorizazion specific parameters ()
-ROLLOUT_STEPS       = 32 
-NUM_ENVS            = 512
+ROLLOUT_STEPS       = 16 
+NUM_ENVS            = 1024
 NUM_UPDATE_EPOCHS   = 64
-MINI_BATCH_SIZE     = 256
+MINI_BATCH_SIZE     = 512
 
 
 # ENVIRONMENT PROPERTIES ----
@@ -44,7 +44,7 @@ DISTANCE_LIMIT          = [0.1, 0.5]
 REWARD_WEIGHTS          = [1.0, 0.0]        # Target position, distance penalty, intensity penalty
 REWARD_EXPS             = 0.5
 POSITIVE_TERMINAL_REWARD = 20
-NEGATIVE_TERMINAL_REWARD = - 200
+NEGATIVE_TERMINAL_REWARD = -200
 
 
 ACTION_SPACE = ActionSpaceDict(
@@ -72,7 +72,7 @@ ENT_COEF            = 0.01
 VF_COEF             = 0.5
 MAX_GRAD_NORM       = 2.5
 TARGET_KL           = None
-NORM_ADV            = True
+NORM_ADV            = False
 
 
 # Neural Networks

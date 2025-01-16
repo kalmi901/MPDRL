@@ -5,7 +5,7 @@ from system_definitions import KM1D2B
 
 from system_definitions.KM1D2B import CP, SP, DP, DEFAULT_MAT_PROPS, DEFAULT_EQ_PROPS, DEFAULT_SOLVER_OPTS
 import GPU_ODE
-GPU_ODE.setup(KM1D2B)
+GPU_ODE.setup(KM1D2B, k=2)
 from GPU_ODE import SolverObject
 import matplotlib.pyplot as plt
 
@@ -20,12 +20,13 @@ EQ_PROPS["R0"][1]   =  5.0 * 1e-6
 EQ_PROPS["FREQ"][0] = 20.0 * 1e3
 EQ_PROPS["FREQ"][1] = 25.0 * 1e3
 EQ_PROPS["REL_FREQ"]= 20.0 * 1e3
+EQ_PROPS["k"]       = 2
 
 
-PA0  = [-1.2 * 1.013]       # Pressure Amplitude 0 (min, max), (bar)
-PA1  = [0.5]                # Pressure Amplitude 1 (min, max), (bar)
+PA0  = [-1.2 * 1.013]       # Pressure Amplitude 0, (bar)
+PA1  = [0.0, 0.0, 0.0]      # Pressure Amplitude 1, (bar)
 SCALE = "lin"
-RES  = 1                   # Resolution 1 --> Thread single time-series curve
+SOLVER_OPTS['NT'] = len(PA0) * len(PA1)      # Resolution 1 --> Thread single time-series curve
 TIME_DOMAIN = [0.0, 1.0]   # Number of Acoustic cycles
 
 # Initial Conditions 
@@ -33,6 +34,7 @@ LR =  MAT_PROPS["CL"] / EQ_PROPS["FREQ"][0]
 X0 = 300 * 1e-6 /  LR     # Dimensionless Position x/λ_0 (-)
 
 ITERATIONS = 100
+NDO        = 1000        # Number of Dense output
 
 def fill_solver_object(solver: SolverObject,
                        pa0: np.ndarray,
@@ -88,6 +90,7 @@ if __name__ == "__main__":
                           number_of_shared_parameters=SOLVER_OPTS["NSP"],
                           number_of_accessories=SOLVER_OPTS["NACC"],
                           number_of_events=SOLVER_OPTS["NE"],
+                          number_of_dense_outputs=NDO,
                           method=SOLVER_OPTS["SOLVER"],
                           threads_per_block=SOLVER_OPTS["BLOCKSIZE"],
                           abs_tol=SOLVER_OPTS["ATOL"],
@@ -119,21 +122,26 @@ if __name__ == "__main__":
 
     solver.syncronize_h2d("all")
 
-
+    tid = 1
     for ic in range(ITERATIONS):
         print(f"Iteration {ic:.0f}")
         solver.solve_my_ivp()
         solver.syncronize_d2h("actual_state")
         solver.syncronize_d2h("time_domain")
+        solver.syncronize_d2h("dense_output")
 
-        t_end = solver.get_host(0, "time_domain", 0)
-        r0    = solver.get_host(0, "actual_state", 0)
-        r1    = solver.get_host(0, "actual_state", 1)
-        x0    = solver.get_host(0, "actual_state", 2)
-        x1    = solver.get_host(0, "actual_state", 3) 
+        t_end = solver.get_host(tid, "time_domain",  0)
+        r0    = solver.get_host(tid, "actual_state", 0)
+        r1    = solver.get_host(tid, "actual_state", 1)
+        x0    = solver.get_host(tid, "actual_state", 2)
+        x1    = solver.get_host(tid, "actual_state", 3)
+        dense_index, dense_time, dense_states = solver.get_dense_output() 
 
         plt.plot(t_end, (x1-x0) * LR * 1e6, "r.", markersize=8)
         plt.plot(t_end, (r0*EQ_PROPS["R0"][0] + r1*EQ_PROPS["R0"][1])*1e6, "b.", markersize=8)
+        plt.plot(dense_time[:dense_index[0]], (dense_states[:dense_index[0],3, tid]-dense_states[:dense_index[0],2,tid]) * LR *1e6, 'k.', markersize=2)
+        plt.plot(dense_time[:dense_index[0]], (dense_states[:dense_index[0],0, tid]*EQ_PROPS["R0"][0]+dense_states[:dense_index[0],1,tid]*EQ_PROPS["R0"][1])*1e6, 'k.', markersize=2)
+
         plt.draw()
         plt.show(block=False)
         input()

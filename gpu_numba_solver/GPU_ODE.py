@@ -53,19 +53,28 @@ class SolverObject():
                 number_of_shared_parameters: int = 0,
                 number_of_accessories : int = 1,
                 number_of_events: int = 0,
+                number_of_dense_outputs: int = 0,
                 threads_per_block : int = 64,
+                device_id: int = 0,
                 method : str = "RKCK45",
-                abs_tol : Union[list, float] = None,
-                rel_tol : Union[list, float] = None,
-                event_tol: Union[list, float] = None,
-                event_dir: Union[list, int] = None,
+                abs_tol : Union[list, float, None] = None,
+                rel_tol : Union[list, float, None] = None,
+                event_tol: Union[list, float, None] = None,
+                event_dir: Union[list, int, None] = None,
                 min_step: float = 1e-16,
                 max_step: float = 1.0e6,
                 init_step:float = 1e-2,
                 growth_limit:float = 5.0,
                 shrink_limit:float = 0.1,
+                cud_jit_kwargs: Union[dict] = {}
                 ):
         
+        # ---- Device Properties and Setup ----------------
+        num_devices = len(cuda.list_devices())
+        assert num_devices > 0, "Error: GPU Device has not been found"
+        assert device_id < num_devices, f"Error: GPU device with ID {device_id} is not available." 
+        self._active_device = cuda.select_device(device_id)
+        self._print_device_attributes()
 
         # ----- Constant (private) properties -------------
         self._system_dimension = system_dimension
@@ -75,18 +84,33 @@ class SolverObject():
         self._number_of_shared_parameters = number_of_shared_parameters
         self._number_of_accessories = number_of_accessories
         self._number_of_events = number_of_events
+        self._number_of_dense_outputs = number_of_dense_outputs
         self._threads_per_block = threads_per_block
         self._blocks_per_grid = self._number_of_threads // self._threads_per_block + (0 if self._number_of_threads % self._threads_per_block == 0 else 1 )
         self._method = method
 
+        # ----- Constant (private) array sizes -----
+        self._size_of_time_domain  = number_of_threads * 2
+        self._size_of_actual_time  = number_of_threads
+        self._size_of_actual_state = system_dimension * number_of_threads
+        self._size_of_accessories  = max(number_of_accessories * number_of_threads, 1)
+        self._size_of_control_parameters = max(number_of_control_parameters * number_of_threads, 1)
+        self._size_of_dynamic_parameteters = max(number_of_dynamic_parameters * number_of_threads, 1)
+        self._size_of_shared_parameters = max(self._number_of_shared_parameters, 1)
+        self._size_of_dense_output_index = max(number_of_threads * number_of_dense_outputs, 1)
+        self._size_of_dense_output_time_instances = max(number_of_threads * number_of_dense_outputs, 1)
+        self._size_of_dense_output_states = max(number_of_threads * system_dimension * number_of_dense_outputs, 1)
+        # TODO: Add more if necessary
 
+        self._check_memory_usage()
+
+        print("-------------------------------")
         print(f"Total number of Active Threads:    {self._number_of_threads:.0f}")
         print(f"BlockSize (threads per block):     {self._threads_per_block:.0f}")
         print(f"GridSize (total number of blocks): {self._blocks_per_grid:.0f}")
 
 
         # Tolerace workaround
-        
         if abs_tol is None:
             self._abs_tol = np.full((system_dimension, ), 1e-8, dtype=np.float64)
         elif type(abs_tol) == list:
@@ -97,9 +121,9 @@ class SolverObject():
         if rel_tol is None:
             self._rel_tol = np.full((system_dimension, ), 1e-8, dtype=np.float64)
         elif type(rel_tol) == list:
-            self._rel_tol = np.array(abs_tol, dtype=np.float64)
+            self._rel_tol = np.array(rel_tol, dtype=np.float64)
         else:
-            self._rel_tol = np.full((system_dimension, ), abs_tol, dtype=np.float64)
+            self._rel_tol = np.full((system_dimension, ), rel_tol, dtype=np.float64)
 
         if event_tol is None:
             self._event_tol = np.full((max(number_of_events, 1), ), 1e-8, dtype=np.float64)
@@ -127,17 +151,6 @@ class SolverObject():
         self.time_step_growth_limit = growth_limit
         self.time_step_shrink_limit = shrink_limit
 
-
-        # ----- Constant (private) array sizes -----
-        self._size_of_time_domain  = number_of_threads * 2
-        self._size_of_actual_time  = number_of_threads
-        self._size_of_actual_state = system_dimension * number_of_threads
-        self._size_of_accessories  = max(number_of_accessories * number_of_threads, 1)
-        self._size_of_control_parameters = max(number_of_control_parameters * number_of_threads, 1)
-        self._size_of_dynamic_parameteters = max(number_of_dynamic_parameters * number_of_threads, 1)
-        self._size_of_shared_parameters = max(self._number_of_shared_parameters, 1)
-        # TODO: Add more if necessary
-
         # ---- Host side (private) arrays -----
         self._h_time_domain  = cuda.pinned_array((self._size_of_time_domain, ), dtype=np.float64)
         self._h_actual_time  = cuda.pinned_array((self._size_of_actual_time, ), dtype=np.float64)
@@ -147,6 +160,9 @@ class SolverObject():
         self._h_dynamic_parameters = cuda.pinned_array((self._size_of_dynamic_parameteters, ), dtype=np.float64)
         self._h_shared_parameters = cuda.pinned_array((self._size_of_shared_parameters, ), dtype=np.float64)
         self._h_status = cuda.pinned_array((number_of_threads, ), dtype=np.int8)
+        self._h_dense_output_index = cuda.pinned_array((self._number_of_threads, ), dtype=np.int32)
+        self._h_dense_output_time_instances = cuda.pinned_array((self._size_of_dense_output_time_instances, ), dtype=np.float64)
+        self._h_dense_output_states = cuda.pinned_array((self._size_of_dense_output_states, ), dtype=np.float64)
 
         # ---- Device side (private) arrays -----
         self._d_time_domain  = cuda.device_array_like(self._h_time_domain)
@@ -157,8 +173,13 @@ class SolverObject():
         self._d_dynamic_parameters = cuda.device_array_like(self._h_dynamic_parameters)
         self._d_shared_parameters = cuda.device_array_like(self._h_shared_parameters)
         self._d_status = cuda.device_array_like(self._h_status)
+        self._d_dense_output_index = cuda.device_array_like(self._h_dense_output_index)
+        self._d_dense_output_time_instances = cuda.device_array_like(self._h_dense_output_time_instances)
+        self._d_dense_output_states = cuda.device_array_like(self._h_dense_output_states)
 
         # ---- Create / Compile the Kenel function -----
+        self._cuda_jit_kwargs = CUDA_JIT_PROPERTIES.copy()
+        self._cuda_jit_kwargs.update(**cud_jit_kwargs)
         self._njit_cuda_kernel = _RKCK45_kernel(self._number_of_threads,
                                                 self._system_dimension,
                                                 self._number_of_control_parameters,
@@ -166,15 +187,17 @@ class SolverObject():
                                                 self._number_of_shared_parameters,
                                                 self._number_of_accessories,
                                                 self._number_of_events,
+                                                self._number_of_dense_outputs,
                                                 self._method,
                                                 self._abs_tol,
                                                 self._rel_tol,
                                                 self._event_tol,
-                                                self._event_dir)
+                                                self._event_dir,
+                                                self._cuda_jit_kwargs)
         
 
     # ---- Interface to call the GPU Kernel function ------
-    def solve_my_ivp(self) :
+    def solve_my_ivp(self):
         self._njit_cuda_kernel[self._blocks_per_grid, self._threads_per_block](
                                 self._number_of_threads,
                                 self._d_actual_state,
@@ -185,6 +208,9 @@ class SolverObject():
                                 self._d_time_domain,
                                 self._d_actual_time,
                                 self._d_status,
+                                self._d_dense_output_index,
+                                self._d_dense_output_time_instances,
+                                self._d_dense_output_states,
                                 self.time_step_init,
                                 self.time_step_max,
                                 self.time_step_min,
@@ -203,6 +229,77 @@ class SolverObject():
         cuda.synchronize()
 
         return np.array(self._h_status, dtype=np.int8)
+
+
+    def _print_device_attributes(self):
+
+        print("-----------------------------------------")
+        if not self._active_device:
+            raise RuntimeError("No active CUDA device selected.")
+        print(f"Device ID: {self._active_device.id}")
+        print(f"Name: {self._active_device.name}")
+        print(f"Compute Capability: {self._active_device.compute_capability[0]}.{self._active_device.compute_capability[1]}")
+        print(f"Max Threads per Block: {self._active_device.MAX_THREADS_PER_BLOCK}")
+        print(f"Max Block Dimensions: {self._active_device.MAX_BLOCK_DIM_X}, {self._active_device.MAX_BLOCK_DIM_Y}, {self._active_device.MAX_BLOCK_DIM_Z}")
+        print(f"Max Grid Dimensions: {self._active_device.MAX_GRID_DIM_X}, {self._active_device.MAX_GRID_DIM_Y}, {self._active_device.MAX_GRID_DIM_Z}")
+        print(f"Shared Memory per Block: {self._active_device.MAX_SHARED_MEMORY_PER_BLOCK // 1024} KB")
+        print(f"Total Constant Memory: {self._active_device.TOTAL_CONSTANT_MEMORY // 1024} KB")
+        print(f"Number of Multiprocessors: {self._active_device.MULTIPROCESSOR_COUNT}")
+        print(f"Warp Size: {self._active_device.WARP_SIZE}")
+        
+        # Memory Info
+        free_mem, total_mem = cuda.current_context().get_memory_info()
+        print(f"Total Memory: {total_mem / (1024 ** 2):.2f} MB")
+        print(f"Free Memory: {free_mem / (1024 ** 2):.2f} MB")
+
+
+    def calculate_memory_requirements(self):
+        bytes_per_element = 8
+        total_elements = (
+            self._size_of_time_domain +
+            self._size_of_actual_time +
+            self._size_of_actual_state +
+            self._size_of_accessories +
+            self._size_of_control_parameters +
+            self._size_of_dynamic_parameteters +
+            self._size_of_shared_parameters +
+            self._size_of_dense_output_index +
+            self._size_of_dense_output_time_instances +
+            self._size_of_dense_output_states
+        )
+        return (total_elements * bytes_per_element, self._size_of_shared_parameters * bytes_per_element) 
+
+    def _check_memory_usage(self):
+        required_memory, required_shared_memory = self.calculate_memory_requirements()
+        max_shared_memory = self._active_device.MAX_SHARED_MEMORY_PER_BLOCK
+        try:
+            free_memory, _ = cuda.current_context().get_memory_info()
+        except cuda.CudaSupportError:
+            raise RuntimeError("No active CUDA context found. Please ensure a valid GPU is selected.")
+
+        required_memory_MB = required_memory / (1024 ** 2)
+        free_memory_MB = free_memory / (1024 ** 2)
+
+    
+        print(f"Required memory: {required_memory_MB:.2f} MB")
+        print(f"Free GPU memory: {free_memory_MB:.2f} MB")
+        print("-----------------------------------------")
+        if required_memory > free_memory:
+            raise ValueError(
+                f"Error: The required memory usge ({required_memory_MB:.2f} MB) exceeds "
+                f"the device's available memory ({free_memory_MB:.2f} MB)."
+            )
+        else:
+            print(f"Global Memory check passed: The required memory fits within the available GPU memory: {required_memory_MB:.2f}/{free_memory_MB:.2f} MB")
+
+
+        if required_shared_memory > max_shared_memory:
+            raise ValueError(
+                f"Error: The shared memory usage ({required_shared_memory / 1024:.2f} KB) exceeds "
+                f"the device's maximum shared memory ({max_shared_memory / 1024:.2f} KB)."
+            )
+        else:
+            print(f"Shared Memory check passed: The Shared memory usage is within limits: {required_shared_memory / 1024:.2f}/{max_shared_memory / 1024:.2f} KB")
 
 
     def syncronize(self):
@@ -228,9 +325,7 @@ class SolverObject():
             elif property == "accessories":
                 return self._d_accessories[idx0:idxN]
         
-            
-
-    
+              
     def set_device_array(self, property: str, index: int, d_ary):
 
         if property == "shared_parameters":
@@ -251,8 +346,6 @@ class SolverObject():
             elif property == "accessories":
                 pass
 
-    
-
 
     # ----  Helper functions -----
     #-----------------------------
@@ -272,8 +365,7 @@ class SolverObject():
             self._d_accessories[idx] = np.float64(value)
         else:
             print("Error: set_device")
-    
-    
+     
     def set_host(self, thread_id: int, property: str, index: int, value: float) :
 
         idx = thread_id + index * self._number_of_threads
@@ -296,7 +388,6 @@ class SolverObject():
             self._h_shared_parameters[index] = np.float64(value)
         else:
             print("Error: Sethost. Not a valid property.")
-
 
     def get_host(self, thread_id: int, property: str, index: int):
 
@@ -339,6 +430,12 @@ class SolverObject():
         else:
             print("Error: Gethost. Not a valid property.")
 
+    def get_dense_output(self):
+        dense_index = self._h_dense_output_index.reshape((self._number_of_threads, ))
+        dense_time = self._h_dense_output_time_instances.reshape((self._number_of_dense_outputs, self._number_of_threads))
+        dense_states = self._h_dense_output_states.reshape((self._number_of_dense_outputs, self._system_dimension, self._number_of_threads))
+        return dense_index, dense_time, dense_states
+
     def syncronize_h2d(self, property:str):
         if property == "time_domain":
             self._d_time_domain.copy_to_device(self._h_time_domain)
@@ -352,6 +449,10 @@ class SolverObject():
             self._d_actual_state.copy_to_device(self._h_actual_state)
         elif property == "accessories":
             self._d_accessories.copy_to_device(self._h_accessories)
+        elif property == "dense_output":
+            self._d_dense_output_index.copy_to_device(self._h_dense_output_index)
+            self._d_dense_output_time_instances.copy_to_device(self._h_dense_output_time_instances)
+            self._d_dense_output_states.copy_to_device(self._h_dense_output_states)
         elif property == "all":
             self._d_time_domain.copy_to_device(self._h_time_domain)
             self._d_control_parameters.copy_to_device(self._h_control_parameters)
@@ -359,6 +460,9 @@ class SolverObject():
             self._d_shared_parameters.copy_to_device(self._h_shared_parameters)
             self._d_actual_state.copy_to_device(self._h_actual_state)
             self._d_accessories.copy_to_device(self._h_accessories)
+            self._d_dense_output_index.copy_to_device(self._h_dense_output_index)
+            self._d_dense_output_time_instances.copy_to_device(self._h_dense_output_time_instances)
+            self._d_dense_output_states.copy_to_device(self._h_dense_output_states)
         else:
             print("Error...")
 
@@ -377,6 +481,10 @@ class SolverObject():
             self._d_actual_state.copy_to_host(self._h_actual_state)
         elif property == "accessories":
             self._d_accessories.copy_to_host(self._h_accessories)
+        elif property == "dense_output":
+            self._d_dense_output_index.copy_to_host(self._h_dense_output_index)
+            self._d_dense_output_time_instances.copy_to_host(self._h_dense_output_time_instances)
+            self._d_dense_output_states.copy_to_host(self._h_dense_output_states)
         elif property == "all":
             self._d_time_domain.copy_to_host(self._h_time_domain)
             self._d_control_parameters.copy_to_host(self._h_control_parameters)
@@ -384,6 +492,9 @@ class SolverObject():
             self._d_shared_parameters.copy_to_host(self._h_shared_parameters)
             self._d_actual_state.copy_to_host(self._h_actual_state)
             self._d_accessories.copy_to_host(self._h_accessories)
+            self._d_dense_output_index.copy_to_host(self._h_dense_output_index)
+            self._d_dense_output_time_instances.copy_to_host(self._h_dense_output_time_instances)
+            self._d_dense_output_states.copy_to_host(self._h_dense_output_states)
         else:
             print("Error...")
 
@@ -400,11 +511,13 @@ def _RKCK45_kernel( number_of_threads: int,
                     number_of_shared_parameters: int,
                     number_of_accessories: int,
                     number_of_events: int,
+                    number_of_dense_outputs: int,
                     method : str,
                     abs_tol : np.ndarray,
                     rel_tol : np.ndarray,
                     event_tol : np.ndarray,
-                    event_dir : np.ndarray):
+                    event_dir : np.ndarray,
+                    cuda_jit: dict):
     
     # CONSTANT PARAMETERS ---------------
     # Create alieses
@@ -415,11 +528,13 @@ def _RKCK45_kernel( number_of_threads: int,
     NSP = number_of_shared_parameters
     NA  = number_of_accessories
     NE  = number_of_events
+    NDO = number_of_dense_outputs
     ALGO = method 
     ATOL = abs_tol
     RTOL = rel_tol
     ETOL = event_tol
     EDIR = event_dir
+    CUDA_JIT = cuda_jit
 
     # DEVICE FUNCTIONS CALLED IN THE KERNEL
     # -------------------------------------
@@ -490,7 +605,6 @@ def _RKCK45_kernel( number_of_threads: int,
 
         return l_update_step, l_terminate_thread, l_new_time_step
 
-
     # Event Handling -----------------------
     @cuda.jit(nb.void(
             nb.int32,
@@ -532,8 +646,41 @@ def _RKCK45_kernel( number_of_threads: int,
 
         return l_update_step, l_new_time_step
 
-    # STEPPER FUNCTIONS -----------------------------
+    # Dense Output --------------------------
+    @cuda.jit(nb.void(
+            nb.int32,
+            nb.float64[:],
+            nb.float64[:],
+            nb.float64[:],
+            nb.float64,
+            nb.float64,
+            nb.float64,
+            nb.float64,
+            nb.int32
+    ), device=True, inline=True)
+    def per_thread_store_dense_output(tid,
+                                      dense_output_time_instances,
+                                      dense_output_states,
+                                      l_actual_state,
+                                      l_actual_time,
+                                      l_dense_output_time,
+                                      l_dense_output_min_time_step,
+                                      l_time_domain_end,
+                                      l_dense_output_index,
+                                      ):
+        
+        dense_output_time_instances[tid + l_dense_output_index * NT] = l_actual_time
+        dense_output_state_index = tid + l_dense_output_index * NT * SD
+        for i in nb.prange(SD):
+            dense_output_states[dense_output_state_index] = l_actual_state[i]
+            dense_output_state_index += NT
 
+        l_dense_output_index += 1
+        l_dense_output_time = min(l_actual_time + l_dense_output_min_time_step, l_time_domain_end)
+
+        return l_dense_output_time, l_dense_output_index 
+
+    # STEPPER FUNCTIONS -----------------------------
     @cuda.jit(nb.boolean(
                 nb.int32,
                 nb.float64[:],
@@ -788,13 +935,16 @@ def _RKCK45_kernel( number_of_threads: int,
                 nb.float64[:],
                 nb.float64[:],
                 nb.int8[:],
+                nb.int32[:],
+                nb.float64[:],
+                nb.float64[:],
                 nb.float64,
                 nb.float64,
                 nb.float64,
                 nb.float64,
                 nb.float64,
                 ),
-                **CUDA_JIT_PROPERTIES)
+                **CUDA_JIT)
     def single_system_per_thread(number_of_threads,
                                 actual_state,
                                 control_parameter,
@@ -804,6 +954,9 @@ def _RKCK45_kernel( number_of_threads: int,
                                 time_domain,
                                 actual_time,
                                 status,
+                                dense_output_index,
+                                dense_output_time_instances,
+                                dense_output_states,
                                 time_step_init,
                                 time_step_max,
                                 time_step_min,
@@ -857,6 +1010,21 @@ def _RKCK45_kernel( number_of_threads: int,
             l_new_time_step = time_step_init
             l_terminate = False    
             l_event_terminal = False 
+
+            if NDO > 0:
+                l_dense_output_time = l_time_domain[0]
+                l_dense_output_min_time_step = (l_time_domain[1] - l_time_domain[0]) / (NDO - 1)
+                l_dense_output_time, \
+                l_dense_output_index = per_thread_store_dense_output(
+                                        tid,
+                                        dense_output_time_instances,
+                                        dense_output_states,
+                                        l_actual_state,
+                                        l_actual_time,
+                                        l_dense_output_time,
+                                        l_dense_output_min_time_step,
+                                        l_time_domain[1],
+                                        0)          
     
             # INITIALIZATION
             per_thread_initialization(
@@ -1011,6 +1179,21 @@ def _RKCK45_kernel( number_of_threads: int,
                             l_dynamic_parameter,
                             s_shared_parameter)
 
+                    if NDO > 0:
+                        # Check Storage Condition
+                        if ((l_dense_output_index < NDO) and (l_dense_output_time <= l_actual_time)):
+                            l_dense_output_time, \
+                            l_dense_output_index = per_thread_store_dense_output(
+                                                        tid,
+                                                        dense_output_time_instances,
+                                                        dense_output_states,
+                                                        l_actual_state,
+                                                        l_actual_time,
+                                                        l_dense_output_time,
+                                                        l_dense_output_min_time_step,
+                                                        l_time_domain[1],
+                                                        l_dense_output_index)                                
+
                     if l_time_domain_ends or l_event_terminal or l_user_terminal:
                         l_terminate = True
 
@@ -1044,6 +1227,8 @@ def _RKCK45_kernel( number_of_threads: int,
 
             actual_time[tid] = l_actual_time
             status[tid] = l_status
+            dense_output_index[tid] = l_dense_output_index if NDO > 0 else 0
+
 
 
     return single_system_per_thread
