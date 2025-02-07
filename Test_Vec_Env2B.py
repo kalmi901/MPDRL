@@ -19,7 +19,8 @@ if __name__ == "__main__":
                     final_distance=0.5,
                     rel_freq=25.0,
                     observation_space_dict=OBSERVATION_SPACE,
-                    render_env=True)
+                    render_env=True,
+                    collect_trajectories=True)
 
     obs, _ = venvs.reset()
     #venvs.reset_envs([0, 4, 5])

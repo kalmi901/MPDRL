@@ -12,12 +12,15 @@ SAVE_WANDB   = False
 LOG_TRAINING = True
 LOG_FREQ     = 1
 SEED         = 42
+RENER_ENV    = False
+EVAL_EPISODES = 10000
+NUM_TRAJRCTORIES = 5000
 
 # Vectorizazion specific parameters ()
 ROLLOUT_STEPS       = 32 
-NUM_ENVS            = 128
+NUM_ENVS            = 8192
 NUM_UPDATE_EPOCHS   = 16 
-MINI_BATCH_SIZE     = 256
+MINI_BATCH_SIZE     = 512
 
 
 # ENVIRONMENT PROPERTIES ----
@@ -70,12 +73,12 @@ POLICY              = "Beta"        # "Gaussian" or "Beta"
 # Neural Networks
 NET_ARCHS = {
     "hidden_dims": [128, 128],
-    "activations": ["ReLU", "ReLU"],
+    "activations": ["Tanh", "Tanh"],
     "shared_dims": 0}
 
 
-def train():
-    venvs = Environment(
+def make_envs(collect_trajectories):
+    return Environment(
         num_envs=NUM_ENVS,
         R0=EQUILIBRIUM_RADIUS,
         components=NUMBER_OF_HARMONICS,
@@ -89,9 +92,15 @@ def train():
         time_step_length=TIME_STEP_LENGTH,
         target_position=TARGET_POSITION,
         initial_position=INITIAL_POSITION,
-        seed=SEED
+        seed=SEED,
+        save_file_name = os.path.join(TRAJECTORY_DIR, TRIAL_NAME),
+        collect_trajectories=collect_trajectories
     )
 
+
+def train():
+    
+    venvs = make_envs(False)
 
     model = PPO(
         venvs=venvs,
@@ -126,9 +135,17 @@ def train():
     else:
         model.learn(total_timesteps=TOTAL_TIMESTEPS)
 
+    # Collect statistics
+    model.predict(total_episodes=EVAL_EPISODES, save_dir=STAT_DIR, stat_fname=TRIAL_NAME)
 
+    # Collect Trajectories
+    model.venvs = make_envs(True)
+    model.predict(total_episodes=NUM_TRAJRCTORIES)
 
 if __name__ == "__main__":
-    train()
+    try:
+        train()
+    except KeyboardInterrupt:
+        print("Exit")
 
 

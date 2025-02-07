@@ -3,7 +3,7 @@ import numpy as np
 
 
 if __name__ == "__main__":
-    venvs = Pos1B1D(16, target_position="random")
+    venvs = Pos1B1D(16, target_position="random", collect_trajectories=True, dense_output_resolution=10_000)
 
     venvs.reset()
 
@@ -12,7 +12,7 @@ if __name__ == "__main__":
     for i in range(50):
         venvs.step()
         venvs.render()
-        input()
+        #input()
 
     """
     for ic in range(500):

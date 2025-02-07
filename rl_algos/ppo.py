@@ -5,7 +5,8 @@ import torch.optim as optim
 
 import time
 import numpy as np
-from typing import Dict, Any
+from pandas import DataFrame as df
+from typing import Dict, Any, Union
 
 try:
     from .common import RolloutBuffer
@@ -28,7 +29,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 class PPO():
     metadata = {"hyperparameters" : ["pi_learning_rate", "vf_learning_rate", "ft_learning_rate", 
                                      "gamma", "gae_lambda", "mini_batch_size", "clip_coef", "clip_vloss", "ent_coef", "vf_coef", "max_grad_norm",
-                                     "target_kl", "norm_adv", "rollout_steps", "num_update_epochs", "gradient_steps",
+                                     "target_kl", "norm_adv", "num_envs", "rollout_steps", "num_update_epochs", "gradient_steps",
                                      "seed", "torch_deterministic", "cuda", "buffer_device", 
                                      "policy_type", "hidden_dims", "activations", "shared_dims"]}
 
@@ -127,6 +128,76 @@ class PPO():
                                     self.venvs.single_observation_space.shape,
                                     self.venvs.single_action_space.shape,
                                     self.buffer_device)
+
+    def save_model(self, save_fname: str, save_dir: Union[str, None] = None):
+        if save_dir is not None:
+            save_fname = f"{save_dir}/{save_fname}"
+        torch.save(self.policy.state_dict(), save_fname+".th")
+
+    def load_model(self, load_fname: str, load_dir: Union[str, None] = None):
+        if load_dir is not None:
+            load_fname = f"{load_dir}/{load_fname}"
+        policy_state_dict = torch.load(load_fname+".th")
+        self.policy.load_state_dict(policy_state_dict)
+
+    def predict(self, total_timesteps: Union[int, None] = None, total_episodes: Union[int, None] = None, save_dir: Union[str, None] = None, stat_fname: Union[str, None] = None):
+        assert total_timesteps is None or total_episodes is None, "Err, set 'total_timesteps' or 'total_episodes'"
+        try:
+            obs, _ = self.venvs.reset(seed=self.seed)
+            global_step = 0
+            episodes = 0
+            episode_returns, episode_lengths = [], []
+            while True:
+                with torch.no_grad():
+                    actions, _, _, _ = self.policy(obs)
+                obs, _, _, _, infos = self.venvs.step(actions)
+                
+                if 'final_observation' in infos.keys():                        
+                    for idx in range(len(infos['dones'])):
+                        episodes +=1
+                        print(f"global_step={global_step}, episode_return={infos['episode_return'][idx]}")
+                        # Collect episode statistics
+                        episode_returns.append(infos['episode_return'][idx].item())
+                        episode_lengths.append(infos["episode_length"][idx].item())
+
+                global_step += self.num_envs        
+                # Check for simulation ends
+                if total_episodes is not None:
+                    if episodes >= total_episodes:
+                        break
+                else:
+                    if global_step > total_timesteps:
+                        break
+
+            # ------- Save Statistics ---------
+            if len(episode_returns) > 0 and len(episode_lengths) > 0:
+                episode_returns = np.array(episode_returns, dtype=np.float32)
+                episode_lengths = np.array(episode_lengths, dtype=np.float32)
+                avg_return = np.mean(episode_returns)
+                std_return = np.std(episode_returns)
+                avg_length = np.mean(episode_lengths)
+                std_length = np.std(episode_lengths)
+
+                print("-------------------------------------------")
+                print(f"Number of Episodes: {len(episode_returns):.0f}")
+                print(f"Episode Returns: {avg_return:.3f}+/-{std_return:.3f}")
+                print(f"Episode Lengths: {avg_length:.3f}+/-{std_length:.3f}")
+                print("-------------------------------------------")
+
+                # -------- Save Data to CSV --------------
+                if stat_fname is not None:
+                    if save_dir is not None:
+                        stat_fname = f"{save_dir}/{stat_fname}.csv"
+                    df({
+                        "episode_returns": episode_returns,
+                        "episode_lengths": episode_lengths
+                    }).to_csv(stat_fname, index=False)
+
+        except KeyboardInterrupt:
+            pass
+        finally:            
+            self.venvs.close()
+
 
 
     def learn(self, total_timesteps: int, log_dir:str = None, project_name: str = None, trial_name: str = None, use_wandb: bool = False, log_frequency: int = 10):

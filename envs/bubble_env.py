@@ -12,6 +12,7 @@ from .common import VSpace
 from .common import Box
 from .common import Discrete
 from .common import Hybrid
+from .common import TrajectorCollector
 
 class ActionSpaceDict:
     action_components = ["PA", "PS", "FR"]
@@ -99,6 +100,7 @@ class BubbleGPUEnv(ABC):
     action_space_dict: ActionSpaceDict
     action_space: VSpace
     observation_space: VSpace
+    trajector_collector: TrajectorCollector
 
     def __init__(self, 
                  num_envs: int,

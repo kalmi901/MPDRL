@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from collections import deque
 from matplotlib import pyplot as plt
 from typing import List, Optional, Union
@@ -6,6 +7,7 @@ from typing import List, Optional, Union
 from envs import BubbleGPUEnv
 from envs import ActionSpaceDict
 from envs import ObservationSpaceDict
+from .common import TrajectorCollector
 
 # SOLVER SPECIFIC PARAMETERS
 # System definition
@@ -41,7 +43,10 @@ class Pos1B1D(BubbleGPUEnv):
                  initial_position: Union[str, float] = "random",
                  position_tolerace: float = 1e-2,
                  apply_termination: bool = True,
-                 render_env: bool = False) -> None:
+                 render_env: bool = False,
+                 collect_trajectories: bool = False,
+                 dense_output_resolution: int = 1000,
+                 save_file_name: str = "Pos1B1D" ) -> None:
 
         # Update Global Dictionaries
         super().__init__(num_envs=num_envs,
@@ -51,6 +56,7 @@ class Pos1B1D(BubbleGPUEnv):
         
         
         SOLVER_OPTS["NT"] = num_envs
+        SOLVER_OPTS["NDO"] = dense_output_resolution if collect_trajectories else 0
         EQ_PROPS["k"] = components
         if all(len(lst) == components for lst in [freqs, pa, phase_shift]):
             for i in range(components):
@@ -80,6 +86,8 @@ class Pos1B1D(BubbleGPUEnv):
         self.apply_termination  = apply_termination
 
         self.render_env = render_env
+        # Collect Radius (R - 0) and Position (X - 1)
+        self.trajector_collector = TrajectorCollector(save_file_name=save_file_name, num_envs=num_envs, state_index=[0, 1]) if collect_trajectories else None
 
         # Configure Solver Object ---------------------------------------
         if ac_type not in ["CONST", "SW_N", "SW_A"]: 
@@ -94,6 +102,7 @@ class Pos1B1D(BubbleGPUEnv):
             number_of_shared_parameters=SOLVER_OPTS["NSP"],
             number_of_dynamic_parameters=SOLVER_OPTS["NDP"]*EQ_PROPS["k"],
             number_of_accessories=SOLVER_OPTS["NACC"],
+            number_of_dense_outputs=SOLVER_OPTS["NDO"],
             method=SOLVER_OPTS["SOLVER"],
             abs_tol=SOLVER_OPTS["ATOL"],
             rel_tol=SOLVER_OPTS["RTOL"]
@@ -149,7 +158,7 @@ class Pos1B1D(BubbleGPUEnv):
         self.R0s = torch.full(size=(self.num_envs, ), fill_value=self.R0, dtype=torch.float32, device="cuda").contiguous()
 
 
-        # Set time domain
+        # Set Host properties
         for tid in range(self.num_envs):
             self.solver.set_host(tid, "time_domain",  0, 0.0)
             self.solver.set_host(tid, "time_domain",  1, self.time_step_length)
@@ -158,7 +167,9 @@ class Pos1B1D(BubbleGPUEnv):
             self.solver.set_host(tid, "actual_state", 2, 0.0)
             self.solver.set_host(tid, "actual_state", 3, 0.0)
 
-        
+            if self.trajector_collector is not None:
+                self.trajector_collector.trajectories[tid].episode_radii = [self.R0s[tid].item()]    
+
         self._fill_control_parameters()
         self._fill_shared_parameters()
         self._fill_dynamic_parameters()
@@ -219,6 +230,9 @@ class Pos1B1D(BubbleGPUEnv):
             self.solver.set_device(tid, "actual_state", 2, 0.0)
             self.solver.set_device(tid, "actual_state", 3, 0.0)
 
+            if self.trajector_collector is not None:
+                self.trajector_collector.trajectories[tid].episode_radii = [self.R0s[tid].item()]
+
             self.algo_steps[tid] = 0
             self.total_rewards[tid] = 0.0
 
@@ -254,6 +268,18 @@ class Pos1B1D(BubbleGPUEnv):
         if self.render_env:
             self.render()
 
+        # ---- Collect Trajectories ----
+        if self.trajector_collector is not None:
+            self.solver.syncronize_d2h("dense_output")
+            self.solver.syncronize()
+            dense_index, dense_time, dense_states = self.solver.get_dense_output()
+            self.trajector_collector.step(self._observation.cpu().numpy().astype(np.float32),
+                                          self._actions.cpu().numpy().astype(np.float32),
+                                          self._rewards.cpu().numpy().astype(np.float32),
+                                          dense_index,
+                                          dense_time,
+                                          dense_states)
+
         # --- Handle final observation 
         info = {}
         #print(self._time_out)
@@ -269,6 +295,12 @@ class Pos1B1D(BubbleGPUEnv):
                 "episode_return"    : self.total_rewards[done_env_idx].clone(),
                 "episode_length"    : self.algo_steps[done_env_idx].clone()
             }
+
+            if self.trajector_collector is not None:
+                self.trajector_collector.end_episode(done_env_idx,
+                                                     self._observation[done_env_idx].cpu().numpy().astype(np.float32),
+                                                     self.algo_steps[done_env_idx].cpu().numpy().astype(np.int32),
+                                                     self.total_rewards[done_env_idx].cpu().numpy().astype(np.float32))
 
             self.reset_envs(done_env_idx)
 

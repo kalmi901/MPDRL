@@ -36,10 +36,11 @@ simulations/single_bubble_position_control/runs/*
 simulations/single_bubble_position_control/wandb
 simulations/single_bubble_position_control/wandb/*
 simulations/single_bubble_position_control/models
-simple_models/single_bubble_position_control/models/*
+simulations/single_bubble_position_control/models/*
 simulations/single_bubble_position_control/statistics
 simulations/single_bubble_position_control/statistics/*
-simulations/single_bubble_position_control/models/*
+simulations/single_bubble_position_control/trajectories
+simulations/single_bubble_position_control/trajectories/*
 simulations/dual_bubble_position_control/__pycache__
 simulations/dual_bubble_position_control/__pycache__/*
 simulations/dual_bubble_position_control/runs
@@ -50,4 +51,8 @@ simulations/dual_bubble_position_control/models
 simulations/dual_bubble_position_control/models/*
 simulations/dual_bubble_position_control/statistics
 simulations/dual_bubble_position_control/statistics/*
-
+simulations/dual_bubble_position_control/trajectories
+simulations/dual_bubble_position_control/trajectories/*
+visualisation_tools/__pycache__
+visualisation_tools/__pycache__/*
+*.pkl

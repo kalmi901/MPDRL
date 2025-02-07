@@ -3,7 +3,7 @@ from rl_algos import PPO
 from envs import Pos2B1D as Environment
 from envs import ActionSpaceDict, ObservationSpaceDict
 import time
-from math import pi
+
 
 # EXPERIMENT PROPERTIES
 PROJECT_NAME = "TestRuns"
@@ -13,11 +13,13 @@ LOG_TRAINING = True
 LOG_FREQ     = 1
 SEED         = 42
 RENDER_ENV   = False
+EVAL_EPISODES = 10000
+NUM_TRAJECTORIES = 5000
 
 
 # Vectorizazion specific parameters ()
-ROLLOUT_STEPS       = 16 
-NUM_ENVS            = 1024
+ROLLOUT_STEPS       = 32 
+NUM_ENVS            = 8192
 NUM_UPDATE_EPOCHS   = 64
 MINI_BATCH_SIZE     = 512
 
@@ -82,8 +84,8 @@ NET_ARCHS = {
     "shared_dims": 0}
 
 
-def train():
-    venvs = Environment(
+def make_envs(collect_trajectories):
+    return Environment(
         num_envs=NUM_ENVS,
         R0=EQUILIBRIUM_RADIUS,
         components=NUMBER_OF_HARMONICS,
@@ -105,9 +107,15 @@ def train():
         apply_termination=APPLY_TERMINATION,
         seed=SEED,
         positive_terminal_reward=POSITIVE_TERMINAL_REWARD,
-        negative_terminal_reward=NEGATIVE_TERMINAL_REWARD
+        negative_terminal_reward=NEGATIVE_TERMINAL_REWARD,
+        save_file_name = os.path.join(TRAJECTORY_DIR, TRIAL_NAME),
+        collect_trajectories=collect_trajectories
     )
 
+
+def train():
+    
+    venvs = make_envs(False)
 
     model = PPO(
         venvs=venvs,
@@ -141,6 +149,13 @@ def train():
     else:
         model.learn(total_timesteps=TOTAL_TIMESTEPS)
 
+    # Collect Statistics
+    model.predict(total_episodes=EVAL_EPISODES, save_dir=STAT_DIR, stat_fname=TRIAL_NAME)
+
+    # Collect Trajectories
+    model.venvs = make_envs(True)
+    model.predict(total_episodes=NUM_TRAJECTORIES)
+    
 
 if __name__ == "__main__":
     try:
