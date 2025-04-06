@@ -540,7 +540,8 @@ def _RKCK45_kernel( number_of_threads: int,
     # -------------------------------------
 
     # Error Control -----------------------
-    @cuda.jit(nb.void(
+    @cuda.jit(nb.types.Tuple(
+            [nb.boolean, nb.boolean, nb.float64])(
                 nb.int32,
                 nb.float64[:],
                 nb.float64[:],
@@ -606,7 +607,8 @@ def _RKCK45_kernel( number_of_threads: int,
         return l_update_step, l_terminate_thread, l_new_time_step
 
     # Event Handling -----------------------
-    @cuda.jit(nb.void(
+    @cuda.jit(nb.types.Tuple(
+        [nb.boolean, nb.float64])(
             nb.int32,
             nb.float64[:],
             nb.float64[:],
@@ -647,7 +649,8 @@ def _RKCK45_kernel( number_of_threads: int,
         return l_update_step, l_new_time_step
 
     # Dense Output --------------------------
-    @cuda.jit(nb.void(
+    @cuda.jit(nb.types.Tuple(
+            [nb.float64, nb.int32])(
             nb.int32,
             nb.float64[:],
             nb.float64[:],
