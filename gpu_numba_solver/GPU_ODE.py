@@ -6,9 +6,9 @@ from typing import Union
 from types import ModuleType
 
 try:
-    from gpu_numba_solver.system_definition_template import *
+    from gpu_numba_solver._system_definition_template import *
 except:
-    from system_definition_template import *
+    from _system_definition_template import *
 
 
 # ---------------------------------------------------------------
@@ -253,7 +253,7 @@ class SolverObject():
         print(f"Free Memory: {free_mem / (1024 ** 2):.2f} MB")
 
 
-    def calculate_memory_requirements(self):
+    def _calculate_memory_requirements(self):
         bytes_per_element = 8
         total_elements = (
             self._size_of_time_domain +
@@ -270,7 +270,7 @@ class SolverObject():
         return (total_elements * bytes_per_element, self._size_of_shared_parameters * bytes_per_element) 
 
     def _check_memory_usage(self):
-        required_memory, required_shared_memory = self.calculate_memory_requirements()
+        required_memory, required_shared_memory = self._calculate_memory_requirements()
         max_shared_memory = self._active_device.MAX_SHARED_MEMORY_PER_BLOCK
         try:
             free_memory, _ = cuda.current_context().get_memory_info()
@@ -674,7 +674,7 @@ def _RKCK45_kernel( number_of_threads: int,
         
         dense_output_time_instances[tid + l_dense_output_index * NT] = l_actual_time
         dense_output_state_index = tid + l_dense_output_index * NT * SD
-        for i in nb.prange(SD):
+        for i in range(SD):
             dense_output_states[dense_output_state_index] = l_actual_state[i]
             dense_output_state_index += NT
 
@@ -769,7 +769,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 s_shared_parameter)
 
         # NEW STATE -------------------------
-        for i in nb.prange(SD):
+        for i in range(SD):
             l_next_state[i] = l_actual_state[i] + dTp6 * (l_next_state[i] + k1[i])
 
             if math.isfinite(l_next_state[i]) == False:
@@ -823,7 +823,7 @@ def _RKCK45_kernel( number_of_threads: int,
 
         # K2 ---------------------
         t = l_actual_time + l_time_step * (1.0 / 5.0)
-        for i in nb.prange(SD):
+        for i in range(SD):
             x[i] = l_actual_state[i] + l_time_step * (1.0 / 5.0) * k1[i]
         
         per_thread_ode_function(tid,
@@ -837,7 +837,7 @@ def _RKCK45_kernel( number_of_threads: int,
         
         # K3 --------------------
         t = l_actual_time + l_time_step * (3.0 / 10.0)
-        for i in nb.prange(SD):
+        for i in range(SD):
             x[i] = l_actual_state[i] \
                     + l_time_step * ( (3.0 / 40.0) * k1[i] \
                                   +   (9.0 / 40.0) * k2[i] )
@@ -853,7 +853,7 @@ def _RKCK45_kernel( number_of_threads: int,
         
         # K4 -------------------
         t = l_actual_time + l_time_step * (3.0 / 5.0)
-        for i in nb.prange(SD):
+        for i in range(SD):
             x[i] = l_actual_state[i] \
                     + l_time_step * ( (3.0 / 10.0) * k1[i] \
                                     - (9.0 / 10.0) * k2[i] \
@@ -870,7 +870,7 @@ def _RKCK45_kernel( number_of_threads: int,
         
         # K5 -------------------
         t = l_actual_time + l_time_step
-        for i in nb.prange(SD):
+        for i in range(SD):
             x[i] = l_actual_state[i] \
                     + l_time_step * (-(11.0 / 54.0) * k1[i] \
                                     + (5.0 / 2.0 )  * k2[i] \
@@ -888,7 +888,7 @@ def _RKCK45_kernel( number_of_threads: int,
 
         # K6 ---------------------
         t = l_actual_time + l_time_step * (7.0 / 8.0)
-        for i in nb.prange(SD):
+        for i in range(SD):
             x[i] = l_actual_state[i] \
                     + l_time_step * ((1631.0/55296.0) * k1[i] \
                                     + (175.0/512.0)   * k2[i] \
@@ -906,7 +906,7 @@ def _RKCK45_kernel( number_of_threads: int,
                                 s_shared_parameter)
         
         # NEW STATE AND ERROR -------------------------
-        for i in nb.prange(SD):
+        for i in range(SD):
             l_next_state[i] = l_actual_state[i] \
                             + l_time_step * ( (37.0/378.0)  * k1[i] \
                                             + (250.0/621.0) * k3[i] \
@@ -971,7 +971,7 @@ def _RKCK45_kernel( number_of_threads: int,
         # SHARED MEMORY MANAGEMENT
         s_shared_parameter = cuda.shared.array((NSP, ) if NSP !=0 else (1, ), dtype=nb.float64)
         num_sp_fill = NSP // cuda.blockDim.x + (0 if NSP % cuda.blockDim.x == 0 else 1)
-        for i in nb.prange(num_sp_fill):
+        for i in range(num_sp_fill):
             s_tid = cuda.threadIdx.x + i * cuda.blockDim.x
             if s_tid < NSP:
                 s_shared_parameter[s_tid] = shared_parameter[s_tid]
@@ -993,19 +993,19 @@ def _RKCK45_kernel( number_of_threads: int,
             l_next_event_value = cuda.local.array((NE, ) if NE !=0 else (1, ), dtype=nb.float64)
             l_status = 0
 
-            for i in nb.prange(2):
+            for i in range(2):
                 l_time_domain[i] = time_domain[tid + i*NT]
             
-            for i in nb.prange(SD):
+            for i in range(SD):
                 l_actual_state[i] = actual_state[tid + i*NT]
 
-            for i in nb.prange(NCP):
+            for i in range(NCP):
                 l_control_parameter[i] = control_parameter[tid + i*NT]
 
-            for i in nb.prange(NDP):
+            for i in range(NDP):
                 l_dynamic_parameter[i] = dynamic_parameter[tid + i*NT]
 
-            for i in nb.prange(NA):
+            for i in range(NA):
                 l_accessories[i] = accessories[tid + i*NT]
             
             l_actual_time = l_time_domain[0]
@@ -1141,7 +1141,7 @@ def _RKCK45_kernel( number_of_threads: int,
                 if l_update_step == True:
                     l_actual_time += l_time_step
 
-                    for i in nb.prange(SD):
+                    for i in range(SD):
                         l_actual_state[i] = l_next_state[i]
 
                     # ACTION AFTER SUCCESFULL TIMESTEP
@@ -1213,19 +1213,19 @@ def _RKCK45_kernel( number_of_threads: int,
 
             cuda.syncthreads()
             # Integration ends, wrtite data back to global memory
-            for i in nb.prange(2):
+            for i in range(2):
                 time_domain[tid + i*NT] = l_time_domain[i]
 
-            for i in nb.prange(SD):
+            for i in range(SD):
                 actual_state[tid + i*NT] = l_actual_state[i]
 
-            for i in nb.prange(NCP):
+            for i in range(NCP):
                 control_parameter[tid + i*NT] = l_control_parameter[i]
 
-            for i in nb.prange(NDP):
+            for i in range(NDP):
                 dynamic_parameter[tid +i*NT] = l_dynamic_parameter[i]
 
-            for i in nb.prange(NA):
+            for i in range(NA):
                 accessories[tid + i*NT] = l_accessories[i]
 
             actual_time[tid] = l_actual_time

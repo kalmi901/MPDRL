@@ -334,7 +334,7 @@ def setup(ac_field, k):
                 + cp[8] * x3i*x3i \
                 + cp[13] * rd * (-2*x0j*x2j**2                                      
                             + 0.5 * rd*x0j**2 
-                            * ( s*(x3i*x2j + x2j*x3j) 
+                            * ( s*(x3i*x2j + 5*x2j*x3j) 
                             - rd*x0j*x3j*(x3i + 2*x3j) ))
 
         D = x0i - cp[7]*x0i*x2i + cp[4]*cp[7]
@@ -408,7 +408,7 @@ class DualBubble:
         self._REF_FREQ = REF_FREQ*1e3 if REF_FREQ is not None else FREQ[0]*1e3
         self._k = k
 
-        # Initial Consitions
+        # Initial Conditions
         self.r0 = np.ones(( 2, ), dtype=np.float64)
         self.u0 = np.zeros((2, ), dtype=np.float64)
         self.x0 = np.zeros((2, ), dtype=np.float64)
