@@ -19,10 +19,11 @@ EQ_PROPS["FREQ"][1] = 40.0 * 1e3
 EQ_PROPS["REL_FREQ"]= 20.0 * 1e3
 EQ_PROPS["k"]       = 2
 
-PA0  = [-1.2 * 1.013]                  # Pressure Amplitude 0, (bar)
-PA1  = [0.0]  *4                        # Pressure Amplitude 1, (bar)
+PA0  = [-1.2 * 1.013]                   # Pressure Amplitude 0, (bar)
+#PA1  = [0.0]  * 4                    # Pressure Amplitude 1, (bar)
+PA1  = [0.0, 0.1, 0.0, 0.2] * 1
 SCALE = "lin"
-TIME_DOMAIN = [0.0, 1.0]               # Number of Acoustic cycles
+TIME_DOMAIN = [0.0, 5.0e0]             # Number of Acoustic cycles
 
 # - Initial Conditions -
 LR =  MAT_PROPS["CL"] / EQ_PROPS["FREQ"][0] 
@@ -33,8 +34,8 @@ ITERATIONS = 100
 SOLVER_OPTS["NS"] = len(PA0) * len(PA1)         # Number of Systems
 SOLVER_OPTS["UPS"]       = 2                    # Number of Units per System (dual bubble)
 SOLVER_OPTS["SPB"]       = 2                    # Systems Per Block
-SOLVER_OPTS["BLOCKSIZE"] = 4                    # Number of Dense Output
-SOLVER_OPTS["NDO"]       = 1000
+SOLVER_OPTS["BLOCKSIZE"] = SOLVER_OPTS["SPB"] * SOLVER_OPTS["UPS"]   
+SOLVER_OPTS["NDO"]       = 128                 # Number of Dense Output
 
 def fill_solver_object(solver,
                        pa0: np.ndarray,
@@ -143,8 +144,9 @@ if __name__ == "__main__":
                        x0 = X0,
                        td = time_domain)
     
+    print("Coupling Matrix")
     #print(solver_object._data_buffers_attrs["coupling_matrices"])
-    #print(solver_object._data_buffers_host["coupling_matrices"])
+    print(solver_object._data_buffers_host["coupling_matrices"])
     #print(solver_object._data_buffers_host["global_parameters"])
     #print(solver_object._data_buffers_host["unit_parameters"])
 
@@ -158,14 +160,16 @@ if __name__ == "__main__":
 
     #print(solver_object._data_buffers_host["actual_state"])
     dense_index, dense_time, dense_state = solver_object.get_dense_output()
-    print(solver_object.get_host_value_unit_scope(1, 1, "actual_state", 0))
+    #print(solver_object.get_host_value_unit_scope(1, 1, "actual_state", 0))
     #print(solver_object.get_host_value_system_scope(1, "dynamic_parameters", 0))
     #print(solver_object.get_host_value_global_scope("global_parameters", 2))
-    print(dense_index)
-    print(dense_time)
-    print(dense_state[:, 0, 0])
+    #print(dense_index)
+    #print(dense_time)
+    #print(dense_state[:, 0, 0])
     print(dense_state[:, 0].shape)
+    
 
-    plt.plot(dense_time[:dense_index[0], 0], dense_state[:dense_index[0], 0, 2])
-    plt.plot(dense_time[:dense_index[0], 0], dense_state[:dense_index[0], 0, 3])
+    plt.plot(dense_time[:dense_index[0], 0], dense_state[:dense_index[0], 0, 0] * EQ_PROPS["R0"][0]*1e6 + dense_state[:dense_index[0], 0, 1] * EQ_PROPS["R0"][1]*1e6, '.')
+    plt.plot(dense_time[:dense_index[0], 0], (dense_state[:dense_index[0], 1, 1] - dense_state[:dense_index[0], 1, 0]) * LR * 1e6, '.')
+    #plt.plot(dense_time[:dense_index[0], 0], dense_state[:dense_index[0], 0, 3] * EQ_PROPS["R0"][1] )
     plt.show()

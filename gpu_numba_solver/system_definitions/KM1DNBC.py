@@ -16,7 +16,7 @@ DEFAULT_SOLVER_OPTS = {
     "NUA" : 0,              # Number of Unit Accessories
     "NSA" : 0,              # Number of System Accessories
     "NC"  : 3,              # Number of Coupling Matrices
-    "NCT" : 6,              # Number of Coupling Terms
+    "NCT" : 8,              # Number of Coupling Terms
     "NCF" : 4,              # Number of Coupling Factor
     "NE"  : 1,              # Number of Events
     "SOLVER": "RKCK45",     # ODE-solver algo
@@ -100,30 +100,31 @@ def setup(k, ac_field):
     #global _PA, _PAT, _GRADP, _UAC
     #global per_block_ode_function
 
-    from _coupled_system_definition_template import __ODE_FUN_SIGNATURE
+    from _coupled_system_definition_template import __ODE_FUN_SIGNATURE, __MAT_VEC_SIGNATURE
    
-    print(__ODE_FUN_SIGNATURE)
+    #print(__ODE_FUN_SIGNATURE)
     print("Initialize the ode system")
     print(f"Number of harmonoc compoentes: {k}")
     print(f"Acoustic field type: {ac_field}")
     _PA, _PAT, _GRADP, _UAC = AC1D.setup(ac_field, k)
 
     @cuda.jit(__ODE_FUN_SIGNATURE, device=True, inline=True)
-    def per_block_initialization(gsid, luid, t, td, x, cpf, up, gp, sp, dp):
+    def per_block_initialization(ups, gsid, luid, t, td, x, cpf, up, gp, sp, dp, cpt, mx):
         
         if luid == 0:
             print("per_block_initialization")
 
     @cuda.jit(__ODE_FUN_SIGNATURE, device=True, inline=True)
-    def per_block_finalization(gsid, luid, t, td, x, cpf, up, gp, sp, dp):
+    def per_block_finalization(ups, gsid, luid, t, td, x, cpf, up, gp, sp, dp, cpt, mx):
         
         if luid == 0:
             print("per_block_finalization")
 
     @cuda.jit(__ODE_FUN_SIGNATURE, device=True, inline=True)
-    def per_block_ode_function(gsid, luid, t, dx, x, cpf, up, gp, sp, dp):
+    def per_block_ode_function(ups, gsid, luid, t, dx, x, cpf, up, gp, sp, dp, cpt, mx):
         """
         RHS of the ODE without the coupling terms
+        ups  - unity per system
         gsid - Global System id
         luid - Local Unit ID
         dx   - Explicit derivative terms! (Threads do not communicate here)
@@ -155,10 +156,20 @@ def setup(k, ac_field):
         # coupling terms j
         # coupling factors i
         # Coupling factors
-        cpf[0] = rD
-        cpf[1] = x[3] * rD
-        cpf[2] = x[2] * rx0
-        cpf[3] = rx0 * rx0
+        cpf[0] = rD                         # G0
+        cpf[1] = x[3] * rD                  # G1 
+        cpf[2] = x[2] * rx0                 # G2
+        cpf[3] = rx0 * rx0                  # G3
+
+        # Coupling Terms
+        cpt[0, luid] = x[0] * x[2]**2  
+        cpt[1, luid] = x[0]**2 * x[2]
+        cpt[2, luid] = x[0]**2 * x[2] * x[3]
+        cpt[3, luid] = x[0]**3 * x[3]
+        cpt[4, luid] = x[0]**3 * x[3]**2
+        cpt[5, luid] = x[0]**2
+        cpt[6, luid] = x[0]**3
+        cpt[7, luid] = x[1]               # Bubble positions
 
         #print(gsid)
 
@@ -171,17 +182,130 @@ def setup(k, ac_field):
             # Debug print
 
 
-    def per_block_explicit_coupling(gsid, luid, dx, x):
+    @cuda.jit(__ODE_FUN_SIGNATURE, device=True, inline=True)
+    def per_block_explicit_coupling(ups, gsid, luid, t, dx, x, cpf, up, gp, sp, dp, cpt, mx):
         """
         Correction of the RHS including the explicit coupling terms
-        Note: per_bloc_ode_function is called first, 
+        Note: per_block_ode_function is called first, coupling factors anc coupling terms are pre-calculated
+        cpt[7]: contains the dimensionless bubble coordinate
         """
+        
+        # --- Radial Couplings ---
+        # First-order
+        xi = cpt[7, luid]                           # Local Bubble Positin
+
+        sum_rad_g0 = 0.0
+        sum_rad_g1 = 0.0
+        sum_trn_ng = 0.0
+        sum_trn_g2 = 0.0
+        sum_trn_g3 = 0.0
+
+        # Matrix - Vector Products 
+        for j in range(ups):
+            # -- Coupling Terms --
+            h0 = cpt[0, j]
+            h1 = cpt[1, j]
+            h2 = cpt[2, j]
+            h3 = cpt[3, j]
+            h4 = cpt[4, j]
+
+            # -- Calculate the distance and the direction --
+            xj = cpt[7, j]                          # Coupled Bubble Positions
+            delta   = math.fabs(xi - xj)
+            m       = 1.0 - nb.float64(luid == j)   # Diagonal Mask 1 ha nem diagonál, 0 ha diagonál (nincs branch)
+            r_delta = m / max(delta, 1e-30)         # inv = m / max(a, eps)  → diagonálon inv=0, különben 1/|xi-xj|
+            s = nb.float64((luid>j) - (j>luid))
+            r_delta2 = r_delta * r_delta
+            sr_delta2= r_delta2 * s
+            r_delta3 = r_delta2*r_delta
+
+            # -- Coupling matrices --
+            m0 = mx[0, luid, j]   # radial
+            m1 = mx[1, luid, j]   # translational
+            m2 = mx[2, luid, j]   # liquid velocity
+
+            sum_rad_g0 += m0 * (
+                -2.0 * r_delta   * h0
+                -2.5 * sr_delta2 * h2
+                -1.0 * r_delta3  * h4
+            )
+
+            sum_rad_g1 += m0 * (
+                -0.5 * sr_delta2 * h2
+                -0.5 * r_delta3  * h3
+            )
+
+            sum_trn_ng += m1 * (
+                 2.0 * sr_delta2 * h0
+                +5.0 * r_delta3  * h2
+            )
+
+            sum_trn_g2 += m1 * (
+                    sr_delta2 * h1
+                +   r_delta3  * h3
+            )
+
+            sum_trn_g3 += m2 * (
+                    sr_delta2 * h1
+                +   r_delta3  * h3
+            )
+
+        # Correct RHS
+        dx[2] += sum_rad_g0 * cpf[0] + sum_rad_g1 * cpf[1]
+        dx[3] += sum_trn_ng + sum_trn_g2 * cpf[2] + sum_trn_g3 * cpf[3]
+
+
+    @cuda.jit(__MAT_VEC_SIGNATURE, device=True, inline=True)
+    def per_block_implicit_mat_vec(ups, gsid, luid, cpf, cpt, mx, v, Av):
+        
+        xi = cpt[7, luid]            # Local Bubble Position
+        av_rad = 0.0
+        av_trn = 0.0
+
+        for j in range(ups):
+            # --- Coupling Terms ---
+            h5 = cpt[5, j]
+            h6 = cpt[6, j]
+
+            # --- Calculate the distantence and the direction ---
+            xj    = cpt[7, j]                       # Coupled bubble position
+            delta = math.fabs(xi - xj)              # Dimensionless Distance
+            m     = 1.0 - nb.float64(luid == j)     # Diagonal Mask
+            r_delta = m / max(delta, 1e-30)         # Avoid division by 0
+            s = nb.float64((luid>j) - (j>luid))     # sign(d)
+            r_delta2 = r_delta * r_delta
+            sr_delta2 = r_delta2 * s
+            r_delta3 = r_delta2 * r_delta
+
+            # -- Coupling matrices --
+            m0 = mx[0, luid, j]   # radial
+            m1 = mx[1, luid, j]   # translational
+            vr = v[0, j]          # v[:num_bubbles]
+            vt = v[1, j]          # v[num_bubbles:]
+
+            # TODO: implement calculation here
+            av_rad += m0 * (
+                    r_delta   * h5 * vr
+                +   sr_delta2 * h6 * vt
+            )
+
+            av_trn += -m1 * (
+                    sr_delta2 * h5 * vr
+                +   r_delta3  * h6 * vt
+            )
+
+        # Add Identity Av + Iv
+        Av[0, luid] = av_rad * cpf[0] + v[0, luid]
+        Av[1, luid] = av_trn + v[1, luid]
+
 
         
     functions = {
-        "per_block_ode_function"   : per_block_ode_function,
-        "per_block_initialization" : per_block_initialization,
-        "per_block_finalization"   : per_block_finalization
+        "per_block_ode_function"      : per_block_ode_function,
+        "per_block_initialization"    : per_block_initialization,
+        "per_block_finalization"      : per_block_finalization,
+        "per_block_explicit_coupling" : per_block_explicit_coupling,
+        "per_block_implicit_mat_vec"  : per_block_implicit_mat_vec
     }
 
     return functions

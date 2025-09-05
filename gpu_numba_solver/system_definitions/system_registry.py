@@ -18,4 +18,4 @@ def discover_systems_in_package(package_path: str, base_package: str):
             full_module_path = f"{base_package}.{module_name}"
             importlib.import_module(full_module_path)
 
-    print(registered_systems)
+    #print(registered_systems)

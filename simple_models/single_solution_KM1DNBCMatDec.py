@@ -8,8 +8,9 @@ Key features:
 - Models a chain of N globally coupled bubbles governed by the Keller–Miksis equation.
 - Intended for theoretical validation and debugging — not optimized for performance.
 - Matches should be verified against limiting cases (e.g., KM1D2B for 2 bubbles).
+- Matrix decomposition is applied to mimic the logic of the GPU code
 
-NOTE: This file intentionally contains copy-pasted code from previous iterations to keep it self-contained and to preserve logic parallelism with GPU implementations. 
+NOTE: This file intentionally contains copy-pasted code from previous implementations to keep it self-contained and to preserve logic parallelism with GPU implementations. 
 The goal here is clarity and traceability — not software modularity.
 """
 
@@ -32,15 +33,17 @@ PE  = 1.4       # Polytrophic Exponent [-]
 
 # Try not to modify 
 __AC_FUN_SIG    = nb.float64[:](nb.float64, nb.float64[:], nb.float64[:], nb.float64[:])
-__ODE_FUN_SIG   = nb.float64[:](nb.float64, nb.float64[:], nb.float64[:,::1], nb.float64[:], nb.float64[:], nb.float64[:,:,:])
-__EVENT_FUN_SIG = nb.float64(nb.float64, nb.float64[:], nb.float64[:,::1], nb.float64[:], nb.float64[:], nb.float64[:,:,:])
+__ODE_FUN_SIG   = nb.float64[:](nb.float64, nb.float64[:], nb.float64[:,::1], nb.float64[:], nb.float64[:], nb.float64[:,:,:], nb.float64, nb.float64, nb.int64)
+__EVENT_FUN_SIG = nb.float64(nb.float64, nb.float64[:], nb.float64[:,::1], nb.float64[:], nb.float64[:], nb.float64[:,:,:], nb.float64, nb.float64, nb.int64)
 __COL_THRESHOLD = 0.25          # Collision Threshold between bubbles
 
 
-def setup(ac_field, k, num_bubbles):
+def setup(ac_field, k, num_bubbles, linsolve: str = "bicg"):
     global _PA, _PAT, _GRADP, _UAC
     global _ode_function
     global _collision_event
+    global _lsolve
+
     # ----------------- Acoustic Field --------------------
     if ac_field == "CONST":
         @nb.njit(__AC_FUN_SIG, inline='always')
@@ -300,8 +303,250 @@ def setup(ac_field, k, num_bubbles):
             return ux
         
     # ------------- ODE SYSTEMS -------------
-    @nb.njit(__ODE_FUN_SIG)
-    def _ode_function(t, x, up, gp, dp, mx):
+
+    # - Implicit Couplings / Linalg Solvers -
+
+    @nb.njit(inline='always', cache=True)
+    def _AxV(r_delta, s, mx, G, H, v):
+        """
+        A00 = G[0] * (mx[0] * r_delta) @ diag(H[5]) + I
+        A01 = 0.5 * G[0] * (mx[0] * r_delta**2 * s) @ diag(H[6])
+        A10 = -(mx[1] * r_delta**2 * s) @ diag(H[5])
+        A11 = -(mx[1] * r_delta**3) @ diag(H[6]) + I
+        """
+        x = np.zeros_like(v)
+        C00 = mx[0] * r_delta
+        x[:num_bubbles] += G[0] * (C00 @ (H[5] * v[:num_bubbles])) + v[:num_bubbles]
+
+        C01 = C00 * r_delta * s
+        x[:num_bubbles] += 0.5 * G[0] * (C01 @ (H[6] * v[num_bubbles:]))
+
+        C10 = mx[1] * r_delta**2
+        x[num_bubbles:] += -(C10 * s) @ (H[5] * v[:num_bubbles])
+
+        C11 = C10 * r_delta
+        x[num_bubbles:] += -C11 @ (H[6] * v[num_bubbles:]) + v[num_bubbles:]
+
+        return x
+
+    @nb.njit(inline='always', cache=True)
+    def _ATxV(r_delta, s, mx, G, H, v1, v2):
+        """
+        A00 = G[0] * (mx[0] * r_delta) @ diag(H[5]) + I
+        A01 = 0.5 * G[0] * (mx[0] * r_delta**2 * s) @ diag(H[6])
+        A10 = -(mx[1] * r_delta**2 * s) @ diag(H[5])
+        A11 = -(mx[1] * r_delta**3) @ diag(H[6]) + I
+        """
+        x1 = np.zeros_like(v1)      # AxV
+        x2 = np.zeros_like(v2)      # ATxV
+        
+        C00 = mx[0] * r_delta
+        x1[:num_bubbles] += G[0] * (C00 @ (H[5] * v1[:num_bubbles]))   + v1[:num_bubbles]
+        x2[:num_bubbles] += H[5] * (C00.T @ (G[0] * v2[:num_bubbles])) + v2[:num_bubbles]
+
+        C01 = C00 * r_delta * s
+        x1[:num_bubbles] += 0.5 * G[0] * (C01 @ (H[6] * v1[num_bubbles:]))
+        x2[num_bubbles:] += 0.5 * H[6] * (C01.T @ (G[0] * v2[:num_bubbles]))
+
+        C10 = mx[1] * r_delta**2
+        x1[num_bubbles:] += -(C10 * s) @ (H[5] * v1[:num_bubbles])
+        x2[:num_bubbles] += -H[5] * ((C10 * s).T @ v2[num_bubbles:])
+
+        C11 = C10 * r_delta
+        x1[num_bubbles:] += -C11 @ (H[6] * v1[num_bubbles:]) + v1[num_bubbles:]
+        x2[num_bubbles:] += -H[6] * (C11.T @ v2[num_bubbles:]) + v2[num_bubbles:]
+
+        return x1, x2
+
+
+    @nb.njit()
+    def _bicg(r_delta, s, mx, G, H, b, atol=1e-10, rtol=1e-10, maxiter=100):
+        x = b.copy()
+        r = b - _AxV(r_delta, s, mx, G, H, x)
+        rt = r.copy()  # shadow residual
+        bnorm = np.linalg.norm(b)
+        tol = max(atol, rtol * bnorm)
+        rnorm = np.linalg.norm(r)
+        if rnorm <= tol:
+            return x, 0  # már konvergált
+
+        eps = 1.0e-30
+        rho_old = 1.0  # dummy init; az első iterációban nem használjuk
+
+        # p, pt az első körben r, rt
+        p = r.copy()
+        pt = rt.copy()
+
+        for k in range(maxiter):
+            # breakdown ellenőrzés
+            rho = r @ rt
+            if np.abs(rho) < eps:
+                return x, -3  # BiCG breakdown (rho ~ 0)
+
+            if k > 0:
+                beta = rho / rho_old
+                p = r + beta * p
+                pt = rt + beta * pt
+
+            #q = A @ p
+            #qt = A.T @ pt  # <-- javítás: pt, nem p!
+            q, qt = _ATxV(r_delta, s, mx, G, H, p, pt)
+
+            d = pt @ q
+            if np.abs(d) < eps:
+                return x, -2  # BiCG breakdown (d ~ 0)
+
+            alpha = rho / d
+            x = x + alpha * p
+            r = r - alpha * q
+            rt = rt - alpha * qt
+
+            rnorm = np.linalg.norm(r)
+            if rnorm <= tol:
+                return x, 1  # konvergált
+
+            rho_old = rho  # <-- javítás: a végén frissítünk
+
+        return x, -1  # maxiter
+
+    @nb.njit()
+    def _bicgstab(r_delta, s, mx, G, H, b, atol=1e-10, rtol=1e-10, maxiter=100):
+        """
+        Warm start: x = b.copy()  (initilized wiht uncoupled rhs).
+        Visszatérés: (x, status)
+        1  = Converged
+        0  = Converged on initialization
+        -1  = max iter reacehed
+        -2  = breakdown: rhat·v ~ 0
+        -3  = breakdown: rho ~ 0
+        -4  = breakdown: t·t ~ 0
+        -5  = breakdown: omega ~ 0
+        """
+        # Warm start a csatolásmentes megoldással
+        x = b.copy()
+        r = b - _AxV(r_delta, s, mx, G, H, x)
+        rhat = r.copy()  # árnyék reziduum
+
+        bnorm = np.linalg.norm(b)
+        tol = max(atol, rtol * bnorm)
+        rnorm = np.linalg.norm(r)
+        if rnorm <= tol:
+            return x, 0
+
+        eps = 1.0e-300
+        rho_old = 1.0
+        alpha = 1.0
+        omega = 1.0
+
+        v = np.zeros_like(b)
+        p = np.zeros_like(b)
+
+        for k in range(maxiter):
+            rho = rhat @ r
+            if np.abs(rho) < eps:
+                return x, -3  # breakdown (rho ~ 0)
+
+            if k == 0:
+                p = r.copy()
+            else:
+                beta = (rho / rho_old) * (alpha / omega)
+                p = r + beta * (p - omega * v)
+
+            #v = A @ p
+            v = _AxV(r_delta, s, mx, G, H, p)
+            denom = rhat @ v
+            if np.abs(denom) < eps:
+                return x, -2  # breakdown (rhat·v ~ 0)
+
+            alpha = rho / denom
+            ss = r - alpha * v
+
+            # Fél-lépés ellenőrzés
+            snorm = np.linalg.norm(ss)
+            if snorm <= tol:
+                x = x + alpha * p
+                return x, 1
+
+            #t = A @ s
+            t = _AxV(r_delta, s, mx, G, H, ss)
+            tt = t @ t
+            if np.abs(tt) < eps:
+                return x, -4  # breakdown (t·t ~ 0)
+
+            omega = (t @ ss) / tt
+
+            x = x + alpha * p + omega * ss
+            r = ss - omega * t
+
+            rnorm = np.linalg.norm(r)
+            if rnorm <= tol:
+                return x, 1
+
+            if np.abs(omega) < eps:
+                return x, -5  # breakdown (omega ~ 0)
+
+            rho_old = rho
+
+        return x, -1
+
+    _lsolve = _bicg if linsolve == "bicg" else _bicgstab
+
+    # ----------- Explicit Coupling -------------
+    @nb.njit()
+    def _explicit_coupling(r_delta, s, mx, G, H):
+        """
+        Calculate the explicit coupling \n
+        ______________\n
+        Arguments: \n
+            r_delta (nb.float64[:,:])    - Inverse of the distance matrix
+            s       (nb.float64[:,:])    - Direction sign matrix
+            mx      (nb.float64[:,:,:])  - Constant coupling matrix
+            G       (nb.float64[:])      - Coupling Factors
+            H       (nb.float64[:])      - Coupling Terms
+        Retruns \n
+            dx_c    (nb.float64[:])      - Correction of the RHS
+        """
+
+        dx_c = np.zeros((2*num_bubbles, ), dtype=np.float64)
+        # --- Radial Couplings ---
+        # First-order
+        coupling_matrix = mx[0] * r_delta
+        dx_c[: num_bubbles] +=  -2.0 * (coupling_matrix @ H [0] ) * G[0]
+
+        # Second-order
+        coupling_matrix = coupling_matrix * r_delta
+        dx_c[: num_bubbles] +=  -0.5 * ((coupling_matrix * s) @ H[1]) * G[1] \
+                                -2.5 * ((coupling_matrix * s) @ H[2]) * G[0]
+        
+        # Third-order
+        coupling_matrix = coupling_matrix * r_delta
+        dx_c[: num_bubbles] +=  -0.5 * (coupling_matrix @ H[3]) * G[1] \
+                                -1.0 * (coupling_matrix @ H[4]) * G[0]
+
+        # --- Translational Couplings ---
+        # Second-Order
+        coupling_matrix = mx[1] * r_delta**2
+        dx_c[num_bubbles :] +=  2.0 * ((coupling_matrix * s) @ H[0]) \
+                                    + ((coupling_matrix * s) @ H[1]) * G[2]
+        
+        # Third-order
+        coupling_matrix = coupling_matrix * r_delta
+        dx_c[num_bubbles :] +=  5.0 * (coupling_matrix @ (H[2])) \
+                                    + (coupling_matrix @ (H[3])) * G[2]
+
+        # --- Translational / Liquid Velocity ---
+        # Second order
+        coupling_matrix = mx[2] * r_delta**2
+        dx_c[num_bubbles :] += ((coupling_matrix * s) @ H[1]) * G[3]
+        # Third order
+        coupling_matrix = coupling_matrix * r_delta
+        dx_c[num_bubbles :] += (coupling_matrix @ H[3]) * G[3]
+
+        return dx_c
+
+    # ---------- Main ODE Function --------------
+    nb.njit(__ODE_FUN_SIG)
+    def _ode_function(t, x, up, gp, dp, mx, latol, lrtol, maxiter):
         """
         Dimensionless Keller--Miksis equation for N-bubble coupled system \n
         ____________\n
@@ -353,69 +598,59 @@ def setup(ac_field, k, num_bubbles):
         r_delta = 1.0 / np.abs(delta)           
         np.fill_diagonal(r_delta, 0.0)          # Set diagonal to zero
 
-        #--- Explicit Terms / Radial ---
-        # First order
-        coupling_matrix = mx[0] * r_delta
-        dx[2*num_bubbles: 3*num_bubbles] +=  -2.0 * (coupling_matrix @ (x0 * x2**2)) * rD
+        # --- Coupling Factors ---
+        G = np.zeros((4, num_bubbles), dtype=np.float64)
+        G[0] = rD
+        G[1] = x3 * rD
+        G[2] = x2 * rx0
+        G[3] = rx0**2
 
-        # Second order
-        coupling_matrix = coupling_matrix * r_delta
-        dx[2*num_bubbles: 3*num_bubbles] += -0.5 * ((coupling_matrix * s) @ (x0**2 * x2)) * (x3 * rD) \
-                                            -2.5 * ((coupling_matrix * s) @ (x0**2 * x2 * x3)) * rD
-        
-        # Third order
-        coupling_matrix = coupling_matrix * r_delta
-        dx[2*num_bubbles: 3*num_bubbles] += -0.5 * (coupling_matrix @ (x0**3 * x3)) * (x3 * rD) \
-                                            -1.0 * (coupling_matrix @ (x0**3 * x3**2)) * rD
+        # --- Coupling Terms ---
+        H = np.zeros((7, num_bubbles), dtype=np.float64)
+        H[0] = x0 * x2**2
+        H[1] = x0**2 * x2
+        H[2] = x0**2 * x2 * x3
+        H[3] = x0**3 * x3
+        H[4] = x0**3 * x3**2
+        H[5] = x0**2
+        H[6] = x0**3
 
-
-        #--- Explicit Terms / Translational ---
-        # Second order
-        coupling_matrix = mx[1] * r_delta**2
-        dx[3*num_bubbles: 4*num_bubbles] += 2.0 * ((coupling_matrix * s) @ (x0 * x2**2 )) \
-                                                + ((coupling_matrix * s) @ (x0**2 * x2)) * (x2 * rx0)
-        
-        # Third order
-        coupling_matrix = coupling_matrix * r_delta
-        dx[3*num_bubbles: 4*num_bubbles] += 5.0 * (coupling_matrix @ (x0**2 * x2 * x3)) \
-                                                + (coupling_matrix @ (x0**3 * x3)) * (x2 * rx0)
-
-
-        # Explicit Terms / Translational / Liquid Velocity
-        # Second order
-        coupling_matrix = mx[2] * r_delta**2
-        dx[3*num_bubbles: 4*num_bubbles] += ((coupling_matrix * s) @ (x0**2 * x2)) * (rx0**2)
-        # Third order
-        coupling_matrix = coupling_matrix * r_delta
-        dx[3*num_bubbles: 4*num_bubbles] += (coupling_matrix @ (x0**3 * x3)) * (rx0**2)
-
+        dx_c = _explicit_coupling(r_delta, s, mx, G, H)
+        dx[2*num_bubbles:] += dx_c
 
         # --- Implicit Terms / Radial ---
-        A = np.zeros((2*num_bubbles, 2*num_bubbles), dtype=np.float64)
+        #A = np.zeros((2*num_bubbles, 2*num_bubbles), dtype=np.float64)
+        #AT = np.zeros((2*num_bubbles, 2*num_bubbles), dtype=np.float64)
         # First order
-        coupling_matrix = mx[0] * r_delta
-        A[:num_bubbles, :num_bubbles] = rD[:, None] * (coupling_matrix * x0[None, :]**2)
+        #coupling_matrix = mx[0] * r_delta
+        #A[:num_bubbles, :num_bubbles] = rD[:, None] * (coupling_matrix * x0[None, :]**2)
+        #AT[:num_bubbles, :num_bubbles] = x0[:,None]**2 * (coupling_matrix.T * rD[None, :])
         # Second order
-        coupling_matrix = coupling_matrix * r_delta * s
-        A[:num_bubbles, num_bubbles:] = 0.5 * rD[:, None] * (coupling_matrix * x0[None,: ]**3)
-        # --- Implciit Terms / Translational ---
+        #coupling_matrix = coupling_matrix * r_delta * s
+        #A[:num_bubbles, num_bubbles:] = 0.5 * rD[:, None] * (coupling_matrix * x0[None, :]**3)
+        #AT[num_bubbles:, :num_bubbles] = 0.5 * x0[:, None]**3 * (coupling_matrix.T * rD[None, :])
+        # --- Implicit Terms / Translational ---
         # Second order
-        coupling_matrix = mx[1] * r_delta**2
-        A[num_bubbles:, :num_bubbles] = -(coupling_matrix * s) * x0[None, :]**2
+        #coupling_matrix = mx[1] * r_delta**2
+        #A[num_bubbles:, :num_bubbles] = -(coupling_matrix * s) * x0[None, :]**2
+        #AT[:num_bubbles, num_bubbles:]= - x0[:, None]**2 * (coupling_matrix * s).T
         # Third order
-        coupling_matrix = coupling_matrix * r_delta
-        A[num_bubbles:, num_bubbles:] = -(coupling_matrix) * x0[None, :]**3
-
+        #coupling_matrix = coupling_matrix * r_delta
+        #A[num_bubbles:, num_bubbles:] = -(coupling_matrix) * x0[None, :]**3
+        #AT[num_bubbles:, num_bubbles:]= - x0[:, None]**3 * coupling_matrix.T
 
         # Fill Diagonal elements ...
-        np.fill_diagonal(A, 1.0)
-
-        dx[2*num_bubbles: 4*num_bubbles] = np.linalg.solve(A, dx[2*num_bubbles:4*num_bubbles])
+        #np.fill_diagonal(A, 1.0)
+        #np.fill_diagonal(AT, 1.0)
+       
+        sol, _ = _lsolve(r_delta, s, mx, G, H, dx[2*num_bubbles:4*num_bubbles], latol, lrtol, maxiter)
+    
+        dx[2*num_bubbles: 4*num_bubbles] = sol
 
         return dx
 
     @nb.njit(__EVENT_FUN_SIG)
-    def _collision_event(t, x, up, gp, dp, mx):
+    def _collision_event(t, x, up, _gp, _dp, _mx, _latol, _lrtol, _lmaxiter):
         x0 = x[:num_bubbles] * up[12]         # Radius rescaled
         x1 = x[  num_bubbles: 2*num_bubbles]
         #min_delta = (x0[:, None] + x0[None, :]) * (1 + __COL_THRESHOLD)     # add a small threshold
@@ -438,7 +673,8 @@ class MultiBubble:
                  REL_FREQ: Optional[float] = None,
                  k: int = 1,
                  AC_FIELD: str = "CONST",
-                 LEN: float = 1.0) -> None:
+                 LEN: float = 1.0,
+                 LINSOLVE: str = "bicg") -> None:
         """
         Arguments
         R0          - equilibrium bubble radii [R00, R01, ... R0N-1] (micron)
@@ -448,10 +684,11 @@ class MultiBubble:
         PS          - phase shift [PS0, PS1, ... PSk-1] (radians)
         REF_FREQ    - relative frequency (optional, default FREQ[0]) (kHz)
         k           - number of harmonic components (int)
+        LINSOLVE    - linear solver for implicit coupling (bicg or bicgstab)
         """
 
         assert len(R0) >=2, "The number of bubbles must be larger than 2"
-        setup(AC_FIELD, k, len(R0))          # Call Setup to initialize the model equations
+        setup(AC_FIELD, k, len(R0), LINSOLVE)          # Call Setup to initialize the model equations
         # CONVER TO SI UNTIS!
         self._R0    = np.array(R0, dtype=np.float64)   * 1e-6
         self._FREQ  = np.array(FREQ, dtype=np.float64) * 1e3
@@ -546,6 +783,9 @@ class MultiBubble:
     def integrate(self,
                     atol: float = 1e-9,
                     rtol: float = 1e-9,
+                    latol: float = 1e-10,
+                    lrtol: float = 1e-10,
+                    maxiter: int = 100,
                     min_step:float = 1e-20,
                     event: Optional[Callable]=None,
                     **options):
@@ -558,7 +798,7 @@ class MultiBubble:
         res = solve_ivp(fun=_ode_function,
                         t_span=[self.t0, self.T],
                         y0=np.hstack((self.r0, self.x0, self.u0, self.v0)),
-                        args=(self.up, self.gp, self.dp, self.mx),
+                        args=(self.up, self.gp, self.dp, self.mx, latol, lrtol, maxiter),
                         method='LSODA',
                         atol=atol,
                         rtol=rtol,
@@ -582,19 +822,23 @@ if __name__ == "__main__":
     LR   = CL / (FREQ[0] * 1000)      # Reference Lenght (m)
 
     # ----- INITIAL CONDITIONS -------------
-    R0 = [6.0, 5.0, 6.0, 5.0]*1        # Equilibrium Bubble Size (micron)
+    #R0 = [6.0, 5.0, 6.0, 5.0]*1        # Equilibrium Bubble Size (micron)
+    R0 = [6.0, 5.0]        # Equilibrium Bubble Size (micron)
 
-    multi_bubbles = MultiBubble(R0, FREQ, PA, PS, k=K, AC_FIELD="CONST", LEN=20000 * 1e-6 / LR)
+    multi_bubbles = MultiBubble(R0, FREQ, PA, PS, k=K, AC_FIELD="CONST", LEN=10000 * 1e-6 / LR,
+                                LINSOLVE="bicgstab")
 
-    multi_bubbles.T = 10
+    multi_bubbles.T = 5
     multi_bubbles.r0[0] = 1.0
     multi_bubbles.r0[1] = 1.0
-    multi_bubbles.u0[0] = 0
-    multi_bubbles.u0[1] = 0
+    multi_bubbles.u0[0] = 0.0
+    multi_bubbles.u0[1] = 0.0
+    multi_bubbles.v0[0] = 0.0
+    multi_bubbles.v0[1] = 0.0
     multi_bubbles.x0[0] = 0 * 1e-6 / LR
     multi_bubbles.x0[1] = 300 * 1e-6 / LR
-    multi_bubbles.x0[2] = 1000 * 1e-6 / LR
-    multi_bubbles.x0[3] = 1300 * 1e-6 / LR
+    #multi_bubbles.x0[2] = 10000 * 1e-6 / LR
+    #multi_bubbles.x0[3] = 10300 * 1e-6 / LR
 
 
     start = time.time()
@@ -608,16 +852,16 @@ if __name__ == "__main__":
     plt.plot(t, (x[1]-x[0]) * LR * 1e6, "r-", label="D_{0-1}(t)")
     plt.plot(t, (r[0]*R0[0] + r[1]*R0[1]), "b-", label="$R_0(t)+R_1(t)$")
 
-    plt.figure(2)
-    plt.plot(t, (x[3]-x[2]) * LR * 1e6, "r-", label="D_{2-3}(t)")
-    plt.plot(t, (r[3]*R0[3] + r[2]*R0[2]), "b-", label="$R_2(t)+R_3(t)$")
+    #plt.figure(2)
+    #plt.plot(t, (x[3]-x[2]) * LR * 1e6, "r-", label="D_{2-3}(t)")
+    #plt.plot(t, (r[3]*R0[3] + r[2]*R0[2]), "b-", label="$R_2(t)+R_3(t)$")
 
 
     plt.figure(3)
     plt.plot(t, x[0] * LR * 1e6, 'k-')
     plt.plot(t, x[1] * LR * 1e6, 'r-')
-    plt.plot(t, x[2] * LR * 1e6, "b-")
-    plt.plot(t, x[3] * LR * 1e6, "g-")
+    #plt.plot(t, x[2] * LR * 1e6, "b-")
+    #plt.plot(t, x[3] * LR * 1e6, "g-")
     plt.ylabel(r"$x_i\, \mu m$")
 
     plt.show()

@@ -24,7 +24,7 @@ EQ_PROPS["k"]       = 2
 
 
 PA0  = [-1.2 * 1.013]       # Pressure Amplitude 0, (bar)
-PA1  = [0.0, 0.0, 0.0]      # Pressure Amplitude 1, (bar)
+PA1  = [0.0, 0.1, 0.2]      # Pressure Amplitude 1, (bar)
 SCALE = "lin"
 SOLVER_OPTS['NT'] = len(PA0) * len(PA1)      # Resolution 1 --> Thread single time-series curve
 TIME_DOMAIN = [0.0, 1.0]   # Number of Acoustic cycles
@@ -122,7 +122,7 @@ if __name__ == "__main__":
 
     solver.syncronize_h2d("all")
 
-    tid = 1
+    tid = 0
     for ic in range(ITERATIONS):
         print(f"Iteration {ic:.0f}")
         solver.solve_my_ivp()
@@ -139,8 +139,8 @@ if __name__ == "__main__":
 
         plt.plot(t_end, (x1-x0) * LR * 1e6, "r.", markersize=8)
         plt.plot(t_end, (r0*EQ_PROPS["R0"][0] + r1*EQ_PROPS["R0"][1])*1e6, "b.", markersize=8)
-        plt.plot(dense_time[:dense_index[tid], tid], (dense_states[:dense_index[tid],3, tid]-dense_states[:dense_index[0],2,tid]) * LR *1e6, 'k.', markersize=2)
-        plt.plot(dense_time[:dense_index[tid], tid], (dense_states[:dense_index[tid],0, tid]*EQ_PROPS["R0"][0]+dense_states[:dense_index[0],1,tid]*EQ_PROPS["R0"][1])*1e6, 'k.', markersize=2)
+        plt.plot(dense_time[:dense_index[tid], tid], (dense_states[:dense_index[tid],3, tid]-dense_states[:dense_index[tid],2,tid]) * LR *1e6, 'k.', markersize=2)
+        plt.plot(dense_time[:dense_index[tid], tid], (dense_states[:dense_index[tid],0, tid]*EQ_PROPS["R0"][0]+dense_states[:dense_index[tid],1,tid]*EQ_PROPS["R0"][1])*1e6, 'k.', markersize=2)
 
         plt.draw()
         plt.show(block=False)
