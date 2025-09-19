@@ -17,6 +17,7 @@ The goal here is clarity and traceability — not software modularity.
 
 import numpy as np
 import numba as nb
+import pandas as pd
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 from typing import List, Optional, Callable
@@ -489,7 +490,25 @@ def setup(ac_field, k, num_bubbles, linsolve: str = "bicg"):
 
         return x, -1
 
-    _lsolve = _bicg if linsolve == "bicg" else _bicgstab
+    @nb.njit()
+    def _jacobi(r_delta, s, mx, G, H, b, atol=1e-10, rtol=1e-10, maxiter=100):
+        x = b.copy()
+        bnorm = np.linalg.norm(b)
+        tol = max(atol, rtol * bnorm)
+        
+        for k in range(maxiter):
+            r = b - _AxV(r_delta, s, mx, G, H, x)
+            x += r
+            rnorm = np.linalg.norm(r)
+            if rnorm <= tol:
+                return x, 1
+
+        return x, -1
+
+    match linsolve:
+        case "bicg"     : _lsolve = _bicg
+        case "bicgstab" : _lsolve = _bicgstab
+        case "jacobi"   : _lsolve = _jacobi
 
     # ----------- Explicit Coupling -------------
     @nb.njit()
@@ -545,7 +564,7 @@ def setup(ac_field, k, num_bubbles, linsolve: str = "bicg"):
         return dx_c
 
     # ---------- Main ODE Function --------------
-    nb.njit(__ODE_FUN_SIG)
+    @nb.njit(__ODE_FUN_SIG)
     def _ode_function(t, x, up, gp, dp, mx, latol, lrtol, maxiter):
         """
         Dimensionless Keller--Miksis equation for N-bubble coupled system \n
@@ -815,7 +834,7 @@ class MultiBubble:
 if __name__ == "__main__":
 
     # ------ ACOUSTIC FIELD PROPERTIES ------
-    K = 1
+    K = 2
     FREQ = [20.0, 40.0]               # (KHz)
     PA = [-1.20 * P0*1e-5, 0.0]       # (bar)
     PS   = [0.0, 0.0]
@@ -826,7 +845,7 @@ if __name__ == "__main__":
     R0 = [6.0, 5.0]        # Equilibrium Bubble Size (micron)
 
     multi_bubbles = MultiBubble(R0, FREQ, PA, PS, k=K, AC_FIELD="CONST", LEN=10000 * 1e-6 / LR,
-                                LINSOLVE="bicgstab")
+                                LINSOLVE="jacobi")
 
     multi_bubbles.T = 5
     multi_bubbles.r0[0] = 1.0
@@ -846,6 +865,10 @@ if __name__ == "__main__":
     end = time.time()
     print(f"Number of Bubbles: {len(R0)}")
     print(f"Total simulation time: {end-start:.2f} seconds")
+
+    pd.DataFrame(np.hstack((t[:, np.newaxis], r[0][:, np.newaxis], r[1][:, np.newaxis],
+                            x[0][:, np.newaxis], x[1][:, np.newaxis])),
+                            dtype=np.float32).to_csv("KMC2B_SOL_DEBUG.csv", header=False, index=False)
 
 
     plt.figure(1)

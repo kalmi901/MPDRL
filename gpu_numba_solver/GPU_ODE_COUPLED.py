@@ -36,10 +36,11 @@ __SYSTEM_DEF_FUNCTIONS = ["per_block_ode_function",
                           "per_block_finalization",
                           "per_block_explicit_coupling",
                           "per_block_implicit_mat_vec",
+                          "per_block_event_function",
+                          "per_block_action_after_event_detection",
                           "per_thread_action_after_timesteps",
                           "per_thread_finalization",
-                          "per_thread_event_function",
-                          "per_thread_action_after_event_detection"]
+                          "per_thread_event_function"]
 
 
 discover_systems_in_package("./gpu_numba_solver/system_definitions", "system_definitions")
@@ -93,17 +94,17 @@ class CoupledSolverObject:
                 threads_per_block : int = 128,
                 device_id: int = 0,
                 method : str = "RKCK45",
-                linsolve: str = "BICGSTAB",
+                linsolve: str = "JACOBI",
                 abs_tol : list | float | None = None,
                 rel_tol : list | float | None = None,
                 lin_abs_tol : float = 1e-9,
                 lin_rel_tol:  float = 1e-9,
-                lin_max_iter: int = 128,
+                lin_max_iter: int = 256,
                 event_tol: list | float| None = None,
                 event_dir:  list | int | None = None,
                 min_step: float = 1e-16,
                 max_step: float = 1.0e6,
-                init_step:float = 1e-2,
+                init_step:float = 1e-4,
                 growth_limit:float = 5.0,
                 shrink_limit:float = 0.1,
                 cuda_jit_kwargs: Optional[Dict] = None
@@ -135,7 +136,7 @@ class CoupledSolverObject:
         self._number_of_dense_outputs = number_of_dense_outputs
 
         assert method in ["RKCK45"], f"Error: {method} is not supported"
-        assert linsolve in ["BICGSTAB"], f"Error: {linsolve} is not supported"
+        assert linsolve in ["BICGSTAB", "JACOBI", None], f"Error: {linsolve} is not supported"
         self._method = method
         self._linsolve = linsolve
         
@@ -260,7 +261,6 @@ class CoupledSolverObject:
             )
 
 
-        print("End")
     def solve_my_ivp(self):
         self._njit_cuda_kernel[self.thread_config["blocks_per_grid"], self.thread_config["threads_per_block"]](
             self._data_buffers_device["actual_state"],
@@ -573,10 +573,12 @@ def _RKCK45_kernel(
     IS_FINITE       = 3
     UPDATE_STEP     = 4
     EVENT_TERMINATED= 5
+    EVENT_DETECTED  = 6
 
 
     # DEVICE FUNCTIONS CALLED IN THE KERNEL
     # -------------------------------------
+    # - LINALG SOLVER / IMPLICIT COUPLING -
     @cuda.jit(nb.void(
             nb.int32,
             nb.int32,
@@ -608,7 +610,7 @@ def _RKCK45_kernel(
         dot_tmp  = cuda.shared.array((SPB, UPS), dtype=nb.float64)
         dot_tmp2 = cuda.shared.array((SPB, UPS), dtype=nb.float64)
 
-        # Per-System scalaras
+        # Per-System scalars
         s_tol   = cuda.shared.array((SPB, ), dtype=nb.float64)
         s_lin_terminated = cuda.shared.array((SPB, ), dtype=nb.int32)
         s_num_iters = cuda.shared.array((SPB, ), dtype=nb.int32)
@@ -618,7 +620,7 @@ def _RKCK45_kernel(
         s_omega = cuda.shared.array((SPB, ), dtype=nb.float64)
         s_rho  = cuda.shared.array((SPB, ), dtype=nb.float64)
 
-        eps2 = 1.0e-30
+        eps2 = 1.0e-300
 
         gsid_valid = (gsid < NS)
         sys_leader = (lsid < SPB) and (luid == 0)
@@ -636,7 +638,7 @@ def _RKCK45_kernel(
             if (not gsid_valid) or s_flags[lsid, IS_TERMINATED] == 1:
                 s_lin_terminated[lsid] = 1
                 s_num_iters[lsid]  = -1
-                cuda.atomic.add(s_num_iters, 0, 1)
+                cuda.atomic.add(s_num_lin_terminated, 0, 1)
             else:
                 s_lin_terminated[lsid] = 0
                 s_num_iters[lsid]  = 0
@@ -653,7 +655,7 @@ def _RKCK45_kernel(
                 # TODO: introduce the coupling index
                 # value = dx[cp_idx[j]]
                 value = dx[CPS + j]     
-                x[lsid, j, luid]    = value
+                x[lsid, j, luid]    = 3.5# value
                 acc += value * value    # ||b||^2 since b := x0
             dot_tmp[lsid, luid] = acc
         else:
@@ -710,11 +712,12 @@ def _RKCK45_kernel(
 
         # --- debug (óvatosan a printekkel) ---
         # TODO: delete when ready
-        #if (gsid == 2) and (luid == 0):
-        #    print("x(0,0)=", x[lsid, 0, 0], " X(0,1)=", x[lsid, 0, 1], " x(1,0)=", x[lsid, 1, 0], " x(1,1)=", x[lsid, 1, 1])
-        #    print("Av(0,0)=", Av[lsid, 0, 0], " Av(0,1)=", Av[lsid, 0, 1], " Av(1,0)=", Av[lsid, 1, 0], " Av(1,1)=", Av[lsid, 1, 1])
-        #    print("s_num_lin_solved", s_num_lin_terminated[0])
-        #cuda.syncthreads()
+        if (gsid == 0) and (luid == 0):
+            print("Initial")
+            print("x(0,0)=", x[lsid, 0, 0], " X(0,1)=", x[lsid, 0, 1], " x(1,0)=", x[lsid, 1, 0], " x(1,1)=", x[lsid, 1, 1])
+            print("Av(0,0)=", Av[lsid, 0, 0], " Av(0,1)=", Av[lsid, 0, 1], " Av(1,0)=", Av[lsid, 1, 0], " Av(1,1)=", Av[lsid, 1, 1])
+            print("s_num_lin_solved", s_num_lin_terminated[0])
+        cuda.syncthreads()
 
         # 4) ---------- ITERATIION ---------------
         # 4/1) Mat-Vec, v = (A @ p)
@@ -855,10 +858,12 @@ def _RKCK45_kernel(
                 dot_tmp2[lsid, luid] = 0.0
             cuda.syncthreads()
 
-            if (gsid == 0) and (luid == 0):
-                print("x(0,0)=", x[lsid, 0, 0], " x(0,1)=", x[lsid, 0, 1], " x(1,0)=", x[lsid, 1, 0], " x(1,1)=", x[lsid, 1, 1])
-                print("r(0,0)=", r[lsid, 0, 0], " r(0,1)=", r[lsid, 0, 1], " r(1,0)=", r[lsid, 1, 0], " r(1,1)=", r[lsid, 1, 1])
-            cuda.syncthreads()
+
+            #if (gsid == 0) and (luid == 0):
+            #    print("Iter ", s_num_iters[lsid] )
+            #    print("x(0,0)=", x[lsid, 0, 0], " x(0,1)=", x[lsid, 0, 1], " x(1,0)=", x[lsid, 1, 0], " x(1,1)=", x[lsid, 1, 1])
+            #    print("r(0,0)=", r[lsid, 0, 0], " r(0,1)=", r[lsid, 0, 1], " r(1,0)=", r[lsid, 1, 0], " r(1,1)=", r[lsid, 1, 1])
+            #cuda.syncthreads()
 
             # 4/7) Check convergence and max iteratis
             if sys_leader and s_lin_terminated[lsid]==0:
@@ -872,15 +877,21 @@ def _RKCK45_kernel(
                     rho += dot_tmp2[lsid, i]
                 if not math.isfinite(r2) or not math.isfinite(rho) or r2 < s_tol[lsid] * s_tol[lsid]:
                     # BiCGSTAB breakdown or convergence
+                    if gsid == 0 and luid == 0:
+                        print("crash")
                     s_lin_terminated[lsid] = 1
                     cuda.atomic.add(s_num_lin_terminated, 0, 1)
                 elif (s_num_iters[lsid] >= MAXITER) and s_lin_terminated[lsid] == 0:
                     # Maximum iteration is reached terminate the system
                     # Avoid double terminat
+                    if gsid == 0 and luid == 0:
+                        print("maxiter")
                     s_lin_terminated[lsid] = 1
                     cuda.atomic.add(s_num_lin_terminated, 0, 1)
                 else:
                     # System is not terminated --> calculete new beta
+                    if gsid == 0 and luid == 0:
+                        print("beta calculation", rho)
                     s_beta[lsid] = (rho / (s_rho[lsid] + eps2)) * (s_alpha[lsid] / (s_omega[lsid] + eps2))
                     s_rho[lsid] = rho
             cuda.syncthreads()
@@ -899,15 +910,189 @@ def _RKCK45_kernel(
                     pj = p[lsid, j, luid]
                     p[lsid, j, luid] = r[lsid, j, luid] + beta * (pj - omega * Av[lsid, j, luid])
             cuda.syncthreads()
-                    
+
             if (gsid == 0) and (luid == 0):
-                print("v(0,0)=", Av[lsid, 0, 0], " v(0,1)=", Av[lsid, 0, 1], " v(1,0)=", Av[lsid, 1, 0], " v(1,1)=", Av[lsid, 1, 1])
-                print("p(0,0)=", p[lsid, 0, 0], " p(0,1)=", p[lsid, 0, 1], " p(1,0)=", p[lsid, 1, 0], " p(1,1)=", p[lsid, 1, 1])
+                print("Iteration", s_num_iters[lsid])
+                print("s_lin_terminated", s_lin_terminated[lsid])
+                print("alpha= ", s_alpha[lsid], " beta= ", s_beta[lsid] * 1e5, " omega= ", s_omega[lsid], " rho= ", s_rho[lsid])
             cuda.syncthreads()
-                 
 
+            #if (gsid == 0) and (luid == 0):
+            #    print("v(0,0)=", Av[lsid, 0, 0], " v(0,1)=", Av[lsid, 0, 1], " v(1,0)=", Av[lsid, 1, 0], " v(1,1)=", Av[lsid, 1, 1])
+            #    print("p(0,0)=", p[lsid, 0, 0], " p(0,1)=", p[lsid, 0, 1], " p(1,0)=", p[lsid, 1, 0], " p(1,1)=", p[lsid, 1, 1])
+            #cuda.syncthreads()
 
+        # ----- END of ITERATIONS -----
+        # 5) Update Solutions
+        #if sys_active and s_lin_terminated[lsid] == 1:
+            #for j in range(CPS):        # coupled unit dimension 
+                # TODO: introduce the coupling index
+                # value = dx[cp_idx[j]]
+                #value = x[lsid, j, luid]
+                #dx[CPS + j] = value     
+        #cuda.syncthreads()
+               
+    @cuda.jit(nb.void(
+            nb.int32,
+            nb.int32,
+            nb.int32,
+            nb.float64[:],
+            nb.float64[:],
+            nb.float64[:,:],
+            nb.float64[:,:,:],
+            nb.int32[:,::]
+    ), device=True, inline=True)
+    def per_block_jacobi(
+        gsid,    # Global System ID
+        lsid,    # Local System ID
+        luid,    # Local Unit ID
+        dx,      # Derivatives (k1, k2,... k5)
+        cpf,     # Coupling factors
+        cpt,     # Coupling termns
+        mx,       # Coupling matrices,
+        s_flags):
+        
+        omega_j = 1.0
+        # Per-block vectors
+        x = cuda.shared.array((SPB, CPS, UPS), dtype=nb.float64)
+        b = cuda.shared.array((SPB, CPS, UPS), dtype=nb.float64)
+        Ax = cuda.shared.array((SPB, CPS, UPS), dtype=nb.float64)
 
+        dot_tmp = cuda.shared.array((SPB, UPS), dtype=nb.float64)
+
+        # Per-System scalars
+        s_lin_terminated = cuda.shared.array((SPB, ), dtype=nb.int32)
+        s_num_iters = cuda.shared.array((SPB, ), dtype=nb.int32)
+        s_num_lin_terminated = cuda.shared.array((1,), dtype=nb.int32)
+        s_tol2 = cuda.shared.array((SPB, ), dtype=nb.float64)
+        s_valid_spb = cuda.shared.array((1,),   nb.int32)
+
+        gsid_valid = (gsid < NS)
+        sys_leader = (lsid < SPB) and (luid == 0)
+        sys_active = (lsid < SPB) and gsid_valid and (s_flags[lsid, IS_TERMINATED] == 0)
+
+        # 0) Initialite the counters
+        if cuda.threadIdx.x == 0:
+            s_num_lin_terminated[0] = 0
+            start = cuda.blockIdx.x * SPB
+            rem = NS - start
+            s_valid_spb[0] = 0 if rem <= 0 else (SPB if rem >= SPB else rem)
+        cuda.syncthreads()
+         
+        if sys_leader:
+            s_lin_terminated[lsid] = 0
+            s_num_iters[lsid]      = 0
+            s_tol2[lsid]           = 0.0
+        cuda.syncthreads()
+
+        # -- Count inactive systems
+        # - 1) system is out of the valid range
+        # - 2) system has already terminatad
+        if sys_leader and \
+            ((not gsid_valid) or s_flags[lsid, IS_TERMINATED] == 1):
+                s_lin_terminated[lsid] = 1
+                s_num_iters[lsid] = -1
+                cuda.atomic.add(s_num_lin_terminated, 0, 1)
+        cuda.syncthreads()
+
+        # 1) x0 := dx[...] ; b := x0 ; ||b||
+        if sys_active and s_lin_terminated[lsid] == 0:
+            acc = 0.0
+            for j in range(CPS):
+                value = dx[CPS + j]
+                x[lsid, j, luid] = value
+                b[lsid, j, luid] = value
+                acc += value * value        # ||b||^2 since b := x
+            dot_tmp[lsid, luid] = acc
+        else:
+            dot_tmp[lsid, luid] = 0.0
+        cuda.syncthreads()
+
+        if sys_leader and sys_active and s_lin_terminated[lsid] == 0:
+            b2 = 0.0
+            for i in range(UPS):
+                b2 += dot_tmp[lsid, i]
+            bnorm = math.sqrt(b2)
+            s_tol2[lsid] = math.pow(max(LATOL, LRTOL * bnorm), 2.0)
+        cuda.syncthreads()
+
+        # --- ITERATION ---
+        while s_num_lin_terminated[0] < SPB:
+            # 2) v = A @ x
+            if sys_active and s_lin_terminated[lsid] == 0:
+                per_block_implicit_mat_vec(UPS, gsid, luid, cpf, cpt, mx, x[lsid], Ax[lsid])
+            cuda.syncthreads()
+
+            # 3) r = (b - v); x += r
+            if sys_active and s_lin_terminated[lsid] == 0:
+                acc = 0.0
+                for j in range(CPS):
+                    rj = b[lsid, j, luid] - Ax[lsid, j, luid]
+                    x[lsid, j, luid] += omega_j * rj
+                    acc += rj * rj
+                dot_tmp[lsid, luid] = acc
+            else:
+                dot_tmp[lsid, luid] = 0.0
+            cuda.syncthreads()
+
+            # 4) r^2 < s_tol*2 or max_iter reached
+            if sys_leader and sys_active and s_lin_terminated[lsid] == 0:
+                r2 = 0.0
+                s_num_iters[lsid] += 1
+                for i in range(UPS):
+                    r2 += dot_tmp[lsid, i]
+                if r2 <= s_tol2[lsid] or s_num_iters[lsid] >= MAXITER:
+                    s_lin_terminated[lsid] = 1
+                    cuda.atomic.add(s_num_lin_terminated, 0, 1)
+            cuda.syncthreads()
+    
+        # 5) dx[...] : = xk
+        if sys_active:
+            for j in range(CPS):
+                value = x[lsid, j, luid]
+                dx[CPS + j] = value
+        cuda.syncthreads()
+
+    @cuda.jit(nb.void(
+            nb.int32,
+            nb.int32,
+            nb.int32,
+            nb.float64[:],
+            nb.float64[:],
+            nb.float64[:,:],
+            nb.float64[:,:,:],
+            nb.int32[:,::]
+    ), device=True, inline=True)
+    def per_block_implicit_coupling(
+        gsid,    # Global System ID
+        lsid,    # Local System ID
+        luid,    # Local Unit ID
+        dx,      # Derivatives (k1, k2,... k5)
+        cpf,     # Coupling factors
+        cpt,     # Coupling termns
+        mx,       # Coupling matrices,
+        s_flags):
+
+        if LIN_ALG == "BICGSTAB":
+            # TODO: BICGSTAB has somewheere bugs.. 
+            #per_block_bicgstab()
+            pass
+        elif LIN_ALG == "JACOBI":
+            per_block_jacobi(
+                gsid,    # Global System ID
+                lsid,    # Local System ID
+                luid,    # Local Unit ID
+                dx,      # Derivatives (k1, k2,... k5)
+                cpf,     # Coupling factors
+                cpt,     # Coupling termns
+                mx,       # Coupling matrices,
+                s_flags
+            )
+        else:
+            # No implciit coupling
+            return
+
+    # --- TIME-STEP CONTROLS ---
     @cuda.jit(nb.void(
             nb.int32,
             nb.int32,
@@ -936,8 +1121,7 @@ def _RKCK45_kernel(
         time_step_min,
         time_step_growth_limit,
         time_step_shrink_limit,
-        s_flags
-    ):
+        s_flags):
         # --- Local alias ---
         active = (lsid < SPB) and (gsid < NS) and (s_flags[lsid, IS_TERMINATED] == 0)
         
@@ -950,7 +1134,6 @@ def _RKCK45_kernel(
         if active and luid == 0:
             s_relative_error[lsid]     = 1.0e30
             s_flags[lsid, UPDATE_STEP] = 1
-            s_flags[lsid, IS_FINITE]   = 1
         cuda.syncthreads()
         
         # --- per-thread: local relative error calculation and accept flag --
@@ -998,13 +1181,14 @@ def _RKCK45_kernel(
             # -- Check finite time step --
             if not math.isfinite(time_step_multiplicator):
                 s_flags[lsid, IS_FINITE] = 0
-                s_flags[lsid, UPDATE_STEP] = 0
-                time_step_multiplicator = time_step_shrink_limit
                 print("TimeStep Calculation: Global System ID: ", gsid, " State is not finite")
 
             # -- Check min time step --
             if s_flags[lsid, IS_FINITE] == 0:
                 # Infinite state --> Reduce the timestep
+                s_flags[lsid, UPDATE_STEP] = 0
+                time_step_multiplicator = time_step_shrink_limit
+
                 if s_time_step[lsid] < time_step_min * 1.01:
                     s_flags[lsid, USER_TERMINATED] = 1
                     print("TimeStep Reduction: Global System ID: ", gsid," State is not a finite and the minimum step size is reached")
@@ -1030,6 +1214,89 @@ def _RKCK45_kernel(
             
         cuda.syncthreads()
 
+    @cuda.jit(nb.void(
+            nb.int32,
+            nb.int32,
+            nb.int32,
+            nb.float64[:],
+            nb.float64[:],
+            nb.float64[:,::],
+            nb.float64[:,::],
+            nb.float64,
+            nb.int32[:,::]
+    ), device=True, inline=True)
+    def block_event_time_step_control(
+        gsid,       # Global System ID
+        lsid,       # Local System ID,
+        luid,       # Local Unit ID,
+        s_time_step,
+        s_new_time_step,
+        s_actual_event_value,
+        s_next_event_value,
+        time_step_min,
+        s_flags):
+        # ---- Local alias ---
+        active = (lsid < SPB) and (gsid < NS) and (s_flags[lsid, IS_TERMINATED] == 0)
+        
+        # --- Shared buffers ---
+        s_event_time_step = cuda.shared.array((SPB, ), dtype=nb.float64)
+        s_is_corrected = cuda.shared.array((SPB, ), dtype=nb.int32)
+
+        # --- per-system init: leader set init buffers
+        if active and luid == 0:
+            s_event_time_step[lsid] = s_time_step[lsid]
+            s_is_corrected[lsid]    = 0
+        cuda.syncthreads()
+
+        if active and luid == 0 and s_flags[lsid, UPDATE_STEP] == 1:
+            for i in range(NE):
+                if( ( ( s_actual_event_value[lsid, i] >  ETOL[i] ) and ( s_next_event_value[lsid, i] < -ETOL[i] ) and ( EDIR[i] <= 0 ) ) or
+				    ( ( s_actual_event_value[lsid, i] < -ETOL[i] ) and ( s_next_event_value[lsid, i] >  ETOL[i] ) and ( EDIR[i] >= 0 ) ) ):
+                        s_event_time_step[lsid] = min( s_event_time_step[lsid], -s_actual_event_value[lsid, i] / (s_next_event_value[lsid, i]-s_actual_event_value[lsid, i]) * s_time_step[lsid] )
+                        s_is_corrected[lsid] = 1
+        cuda.syncthreads()
+
+        if active and luid == 0 and s_is_corrected[lsid]==1:
+            if s_event_time_step[lsid] < time_step_min*1.01:
+                print("TimeStep Reduction: Global System ID: ", gsid," Event can not be detected without reducing the step size below the")
+            else:
+                print("TimeStep Reduction: Global System ID: ", gsid, " Event detection requires smaller timestep")
+                s_new_time_step[lsid] = s_event_time_step[lsid]
+                s_flags[lsid, UPDATE_STEP] = 0
+        cuda.syncthreads()
+
+    @cuda.jit(nb.void(
+            nb.int32,
+            nb.int32,
+            nb.int32,
+            nb.float64[:,::],
+            nb.float64[:,::],
+            nb.int32[:,::],
+            nb.int32[:,::]
+    ), device=True, inline=True)
+    def block_event_detection(
+        gsid,       # Global System ID
+        lsid,       # Local System ID,
+        luid,       # Local Unit ID,
+        s_actual_event_value,
+        s_next_event_value,
+        s_event_detected,
+        s_flags):
+        
+        active = (lsid < SPB) and (gsid < NS) and (s_flags[lsid, IS_TERMINATED] == 0)
+        if active and luid == 0:
+            s_flags[lsid, EVENT_DETECTED] = 0
+        cuda.syncthreads()
+
+        if active and luid == 0:
+            for i in range(NE):
+                if( ( ( s_actual_event_value[lsid, i] >  ETOL[i] ) and ( abs(s_next_event_value[lsid, i]) < ETOL[i] ) and ( EDIR[i] <= 0 ) ) or
+                    ( ( s_actual_event_value[lsid, i] < -ETOL[i] ) and ( abs(s_next_event_value[lsid, i]) < ETOL[i] ) and ( EDIR[i] >= 0 ) ) ):
+                    s_event_detected[lsid, i] = 1
+                    s_flags[lsid, EVENT_DETECTED] = 1
+                else:
+                    s_event_detected[lsid, i] = 0
+        cuda.syncthreads()
 
     # --- DENSE OUTPUT ---
     @cuda.jit(nb.void(
@@ -1094,7 +1361,6 @@ def _RKCK45_kernel(
 
         cuda.syncthreads()
 
-
     # --- STEPPER FUNCTIONS ---
     @cuda.jit(
         nb.void(
@@ -1152,6 +1418,10 @@ def _RKCK45_kernel(
         t  = s_actual_time[lsid]
         dt = s_time_step[lsid]
 
+        if active and luid == 0:
+            s_flags[lsid, IS_FINITE] = 1
+        cuda.syncthreads()
+
         # --- K1 ---
         if active:
             per_block_ode_function(
@@ -1173,12 +1443,11 @@ def _RKCK45_kernel(
 
         cuda.syncthreads()
 
-        #per_block_bicgstab(
-        #    gsid, lsid, luid, 
-        #    k1, l_coupling_factor, s_coupling_terms[lsid], s_coupling_matrices[lsid],
-        #    s_flags)
-
-        #cuda.syncthreads()
+        per_block_implicit_coupling(
+            gsid, lsid, luid,
+            k1, l_coupling_factor, s_coupling_terms[lsid], s_coupling_matrices[lsid],
+            s_flags)
+        cuda.syncthreads()
 
         # --- K2 ---
         if active:
@@ -1203,6 +1472,12 @@ def _RKCK45_kernel(
                 s_system_parameters[lsid], s_dynamic_parameres[lsid],
                 s_coupling_terms[lsid], s_coupling_matrices[lsid])
 
+        cuda.syncthreads()
+
+        per_block_implicit_coupling(
+            gsid, lsid, luid,
+            k2, l_coupling_factor, s_coupling_terms[lsid], s_coupling_matrices[lsid],
+            s_flags)
         cuda.syncthreads()
 
         # --- K3 ---
@@ -1230,6 +1505,12 @@ def _RKCK45_kernel(
                 s_system_parameters[lsid], s_dynamic_parameres[lsid],
                 s_coupling_terms[lsid], s_coupling_matrices[lsid])
 
+        cuda.syncthreads()
+
+        per_block_implicit_coupling(
+            gsid, lsid, luid,
+            k3, l_coupling_factor, s_coupling_terms[lsid], s_coupling_matrices[lsid],
+            s_flags)
         cuda.syncthreads()
 
         # --- K4 ---
@@ -1260,6 +1541,12 @@ def _RKCK45_kernel(
 
         cuda.syncthreads()
 
+        per_block_implicit_coupling(
+            gsid, lsid, luid,
+            k4, l_coupling_factor, s_coupling_terms[lsid], s_coupling_matrices[lsid],
+            s_flags)
+        cuda.syncthreads()
+
         # --- K5 ---
         if active:
             t = t0 + dt
@@ -1287,6 +1574,12 @@ def _RKCK45_kernel(
                 s_system_parameters[lsid], s_dynamic_parameres[lsid],
                 s_coupling_terms[lsid], s_coupling_matrices[lsid])
 
+        cuda.syncthreads()
+
+        per_block_implicit_coupling(
+            gsid, lsid, luid,
+            k5, l_coupling_factor, s_coupling_terms[lsid], s_coupling_matrices[lsid],
+            s_flags)
         cuda.syncthreads()
 
         # --- K6 ---
@@ -1319,6 +1612,12 @@ def _RKCK45_kernel(
 
         cuda.syncthreads()
 
+        per_block_implicit_coupling(
+            gsid, lsid, luid,
+            k6, l_coupling_factor, s_coupling_terms[lsid], s_coupling_matrices[lsid],
+            s_flags)
+        cuda.syncthreads()
+
         # --- NEW STATE AND ERROR ---
         if active:
             for i in range(UD):
@@ -1340,7 +1639,6 @@ def _RKCK45_kernel(
                     s_flags[lsid, IS_FINITE] = 0
         
         cuda.syncthreads()
-
 
 
     # -------------------------------------
@@ -1384,6 +1682,9 @@ def _RKCK45_kernel(
         s_time_step   = cuda.shared.array((SPB, ),  dtype=nb.float64)
         s_new_time_step = cuda.shared.array((SPB, ),dtype=nb.float64)
 
+        # Shared States
+        s_actual_state = cuda.shared.array((SPB, 2, UPS), dtype=nb.float64)                 # TODO: Correct 2
+
         # Shared Parameters
         s_global_parameters = cuda.shared.array((NGP_P, ), dtype=nb.float64)                # Hopefully fits into the smem
         s_system_parameters = cuda.shared.array((SPB, NSP_P), dtype=nb.float64)
@@ -1399,9 +1700,15 @@ def _RKCK45_kernel(
             s_dense_output_time_index = cuda.shared.array((SPB, ), dtype=nb.uint32)
             s_dense_output_time       = cuda.shared.array((SPB, ), dtype=nb.float64)
 
+        if NE > 0:
+            s_actual_event_value = cuda.shared.array((SPB, NE), dtype=nb.float64)
+            s_next_event_value   = cuda.shared.array((SPB, NE), dtype=nb.float64)
+            s_event_detected     = cuda.shared.array((SPB, NE), dtype=nb.int32)
+        
+        
         # Runtime Flags
         s_terminated_systems_per_block = cuda.shared.array((1, ), dtype=nb.int32)         # cuda.atomic.add( )  32bit!
-        s_flags = cuda.shared.array((SPB, 6), dtype=nb.int32)
+        s_flags = cuda.shared.array((SPB, 7), dtype=nb.int32)
 
         if cuda.threadIdx.x == 0:
             s_terminated_systems_per_block[0] = 0
@@ -1482,7 +1789,7 @@ def _RKCK45_kernel(
 
         cuda.syncthreads()
         
-        if (lsid < SPB) and (gsid < NS) and (s_flags[lsid][IS_TERMINATED] == 0):
+        if (lsid < SPB) and (gsid < NS) and (s_flags[lsid, IS_TERMINATED] == 0):
             # - INITIALIZATION -
             l_dense_output_min_time_step = (s_time_domain[lsid, 1] - s_time_domain[lsid, 0]) / (NDO - 1)
             per_block_initialization(
@@ -1501,10 +1808,20 @@ def _RKCK45_kernel(
                 s_coupling_matrices[lsid])
         cuda.syncthreads()
         
-        if (NE > 0):
-                # per_block_event_function
-                # per_block_event_time_step_control
-                pass
+        if (NE > 0) and (lsid < SPB) and (gsid < NS) and (s_flags[lsid, IS_TERMINATED] == 0):
+            per_block_event_function(
+                UPS,
+                gsid,
+                lsid,
+                luid,
+                s_actual_time[lsid],
+                l_actual_state,
+                s_actual_state[lsid],
+                s_actual_event_value[lsid],
+                l_unit_parameters,
+                s_global_parameters,
+                s_system_parameters[lsid],
+                s_dynamic_parameters[lsid])
         cuda.syncthreads()
 
         if (NDO > 0): 
@@ -1523,8 +1840,7 @@ def _RKCK45_kernel(
                 s_time_domain[lsid, 1],
                 s_flags
             )
-            print(l_dense_output_min_time_step)
-        cuda.syncthreads()
+            cuda.syncthreads()
 
 
         # - SOLVER MAIN LOOP -
@@ -1588,10 +1904,34 @@ def _RKCK45_kernel(
                 cuda.syncthreads()
 
             # 3) NEW EVENT VALUE AND TIME STEP CONTROL -
+            if (NE > 0) and (lsid < SPB) and (gsid < NS) and (s_flags[lsid, IS_TERMINATED] == 0):
+                per_block_event_function(
+                    UPS,
+                    gsid,
+                    lsid,
+                    luid,
+                    s_actual_time[lsid] + s_time_step[lsid],
+                    l_next_state,
+                    s_actual_state[lsid],
+                    s_next_event_value[lsid],
+                    l_unit_parameters,
+                    s_global_parameters,
+                    s_system_parameters[lsid],
+                    s_dynamic_parameters[lsid])
+            cuda.syncthreads()
             if NE > 0:
-                # per block event function
-                # per block event time_step_control
-                pass
+                block_event_time_step_control(
+                    gsid,
+                    lsid,
+                    luid,
+                    s_time_step,
+                    s_new_time_step,
+                    s_actual_event_value,
+                    s_next_event_value,
+                    time_step_min,
+                    s_flags
+                )
+                cuda.syncthreads()
 
 
             # 4) SUCCESFULL TIME STEPPING UPDATE TIME AND STATE, per-system (leader)
@@ -1599,19 +1939,62 @@ def _RKCK45_kernel(
                 (s_flags[lsid, UPDATE_STEP] == 1):
                 if luid == 0:
                     s_actual_time[lsid] += s_time_step[lsid]
-                    #if gtid == 0:
-                    #print("s_actual_time", gsid, s_actual_time[lsid])
+                    #if gsid == 0:
+                    #    print("s_actual_time", gsid, s_actual_time[lsid])
 
                 for i in range(UD):
                     l_actual_state[i] = l_next_state[i]
-                    #if gtid == 0 and i == 0:
-                    #    print(l_coupling_factors[3])
+                    #if gsid == 0 and i == 0:
+                    #    print("luid", luid, l_actual_state[i])
 
             cuda.syncthreads()
 
                 # USER DEFINED ACTION AFTER SUCCESSFUL TIMESTEP
-                # EVENT TERMINAL
-                # EVENT FUNCION
+            # EVENT DETECTION
+            if NE > 0:
+                block_event_detection(
+                    gsid,
+                    lsid,
+                    luid,
+                    s_actual_event_value,
+                    s_next_event_value,
+                    s_event_detected,
+                    s_flags,
+                )
+                cuda.syncthreads()
+
+            if (NE > 0) and (lsid < SPB) and (gsid < NS) and (s_flags[lsid, IS_TERMINATED] == 0) and (s_flags[lsid, EVENT_DETECTED] == 1):
+                per_block_action_after_event_detection(
+                    gsid, 
+                    lsid, 
+                    luid, 
+                    s_actual_time[lsid],
+                    l_actual_state,
+                    l_unit_parameters, 
+                    s_global_parameters,
+                    s_system_parameters[lsid],
+                    s_dynamic_parameters[lsid],
+                    s_event_detected[lsid],
+                    s_flags[:, EVENT_TERMINATED])
+
+            cuda.syncthreads()
+
+            # EVENT FUNCION
+            if (NE > 0) and (lsid < SPB) and (gsid < NS) and (s_flags[lsid, IS_TERMINATED] == 0):
+                per_block_event_function(
+                    UPS,
+                    gsid,
+                    lsid,
+                    luid,
+                    s_actual_time[lsid],
+                    l_actual_state,
+                    s_actual_state[lsid],
+                    s_actual_event_value[lsid],
+                    l_unit_parameters,
+                    s_global_parameters,
+                    s_system_parameters[lsid],
+                    s_dynamic_parameters[lsid])
+            cuda.syncthreads()
 
             if NDO > 0:
                 # STORE DENSE OUTPUT
@@ -1630,8 +2013,7 @@ def _RKCK45_kernel(
                     s_time_domain[lsid][1],
                     s_flags,
                 )
-
-            cuda.syncthreads()
+                cuda.syncthreads()
 
             # 5) CHECK TERMINATION per system (leader)
             if (lsid < SPB) and (gsid < NS) and (luid == 0):
@@ -1705,7 +2087,7 @@ def _RKCK45_kernel(
             #print("Total number of blocks (GridSize):", NUM_BLOCKS)
             #print("Number of block launches:", NUM_BLOCK_LAUNCHES)
             #print(tid, s_terminated_systems_per_block[0])
-            print(gtid, l_actual_state[0])
+            #print(gtid, l_actual_state[0])
             #print(gtid, s_dynamic_parameters[0, 0])
             #print(gtid, s_dynamic_parameters[0, 1])
             #print(gtid, s_dynamic_parameters[0][2])

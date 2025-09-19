@@ -1,7 +1,6 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from numba import cuda
-cuda.select_device(0)
 import GPU_ODE_COUPLED
 defaults, parameters = GPU_ODE_COUPLED.setup("KM1DNBC", k=2, ac_field="CONST")
 from GPU_ODE_COUPLED import CoupledSolverObject
@@ -35,7 +34,7 @@ SOLVER_OPTS["NS"] = len(PA0) * len(PA1)         # Number of Systems
 SOLVER_OPTS["UPS"]       = 2                    # Number of Units per System (dual bubble)
 SOLVER_OPTS["SPB"]       = 2                    # Systems Per Block
 SOLVER_OPTS["BLOCKSIZE"] = SOLVER_OPTS["SPB"] * SOLVER_OPTS["UPS"]   
-SOLVER_OPTS["NDO"]       = 128                 # Number of Dense Output
+SOLVER_OPTS["NDO"]       = 512                 # Number of Dense Output
 
 def fill_solver_object(solver,
                        pa0: np.ndarray,
@@ -122,6 +121,7 @@ if __name__ == "__main__":
         number_of_dense_outputs=SOLVER_OPTS["NDO"],
         threads_per_block=SOLVER_OPTS["BLOCKSIZE"],
         method=SOLVER_OPTS["SOLVER"],
+        linsolve="JACOBI",
         abs_tol=SOLVER_OPTS["ATOL"],
         rel_tol=SOLVER_OPTS["RTOL"],
         event_tol=SOLVER_OPTS["ETOL"],
@@ -133,20 +133,15 @@ if __name__ == "__main__":
     pa0 = np.array(PA0, dtype=np.float64)
     pa1 = np.array(PA1, dtype=np.float64)
 
-    # Data Containeres
-    t = np.zeros((ITERATIONS, ), dtype=np.float64)
-    x = np.zeros((ITERATIONS, ), dtype=np.float64)
-    v = np.zeros((ITERATIONS, ), dtype=np.float64)
-
     fill_solver_object(solver=solver_object,
                        pa0 = pa0,
                        pa1 = pa1,
                        x0 = X0,
                        td = time_domain)
     
-    print("Coupling Matrix")
+    #print("Coupling Matrix")
     #print(solver_object._data_buffers_attrs["coupling_matrices"])
-    print(solver_object._data_buffers_host["coupling_matrices"])
+    #print(solver_object._data_buffers_host["coupling_matrices"])
     #print(solver_object._data_buffers_host["global_parameters"])
     #print(solver_object._data_buffers_host["unit_parameters"])
 
@@ -168,8 +163,14 @@ if __name__ == "__main__":
     #print(dense_state[:, 0, 0])
     print(dense_state[:, 0].shape)
     
+    df = pd.read_csv("KMC2B_SOL_DEBUG.csv", names=["t", "r0", "r1", "x0", "x1"])
 
-    plt.plot(dense_time[:dense_index[0], 0], dense_state[:dense_index[0], 0, 0] * EQ_PROPS["R0"][0]*1e6 + dense_state[:dense_index[0], 0, 1] * EQ_PROPS["R0"][1]*1e6, '.')
-    plt.plot(dense_time[:dense_index[0], 0], (dense_state[:dense_index[0], 1, 1] - dense_state[:dense_index[0], 1, 0]) * LR * 1e6, '.')
+    plt.figure(1)
+    plt.plot(df["t"], (df["x1"]-df["x0"]) * LR * 1e6, "r-", label="D(t)")
+    plt.plot(df["t"], (df["r0"]*EQ_PROPS["R0"][0] + df["r1"]*EQ_PROPS["R0"][1])*1e6, "b-", label="$R_0(t)+R_1(t)$")
+
+
+    plt.plot(dense_time[:dense_index[0], 0], dense_state[:dense_index[0], 0, 0] * EQ_PROPS["R0"][0]*1e6 + dense_state[:dense_index[0], 0, 1] * EQ_PROPS["R0"][1]*1e6, 'g.')
+    plt.plot(dense_time[:dense_index[0], 0], (dense_state[:dense_index[0], 1, 1] - dense_state[:dense_index[0], 1, 0]) * LR * 1e6, 'm.')
     #plt.plot(dense_time[:dense_index[0], 0], dense_state[:dense_index[0], 0, 3] * EQ_PROPS["R0"][1] )
     plt.show()

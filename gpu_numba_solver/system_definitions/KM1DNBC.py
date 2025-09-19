@@ -18,13 +18,15 @@ DEFAULT_SOLVER_OPTS = {
     "NC"  : 3,              # Number of Coupling Matrices
     "NCT" : 8,              # Number of Coupling Terms
     "NCF" : 4,              # Number of Coupling Factor
+    "CID" : [2, 3],         # Coupling Index
+    "NSS" : 2,              # Number of Shared State
     "NE"  : 1,              # Number of Events
     "SOLVER": "RKCK45",     # ODE-solver algo
     "BLOCKSIZE": 64,        # Number of Threads per block
     "ATOL" : 1e-9,          # Absolute Tolerance
     "RTOL" : 1e-9,          # Relative Tolerance
-    "ETOL": 1e-6,           # Event Tolerance
-    "EDIR":-1,              # Event Direction
+    "ETOL": 1e-3,           # Event Tolerance
+    "EDIR": 0,              # Event Direction
     "NDO" : 1000            # Numberf of Dense Output
 }
 
@@ -100,7 +102,7 @@ def setup(k, ac_field):
     #global _PA, _PAT, _GRADP, _UAC
     #global per_block_ode_function
 
-    from _coupled_system_definition_template import __ODE_FUN_SIGNATURE, __MAT_VEC_SIGNATURE
+    from _coupled_system_definition_template import __ODE_FUN_SIGNATURE, __MAT_VEC_SIGNATURE, __EVENT_FUN_SIGNATURE, __EVENT_ACTION_FUN_SIGNATURE
    
     #print(__ODE_FUN_SIGNATURE)
     print("Initialize the ode system")
@@ -110,15 +112,14 @@ def setup(k, ac_field):
 
     @cuda.jit(__ODE_FUN_SIGNATURE, device=True, inline=True)
     def per_block_initialization(ups, gsid, luid, t, td, x, cpf, up, gp, sp, dp, cpt, mx):
-        
-        if luid == 0:
-            print("per_block_initialization")
+        if gsid == 0:
+            print("luid ", luid,", t=", t,", x[0]=", x[0], ", x[1]=", x[1], ", x[2]=", x[2], ", x[3]=", x[3])
 
     @cuda.jit(__ODE_FUN_SIGNATURE, device=True, inline=True)
     def per_block_finalization(ups, gsid, luid, t, td, x, cpf, up, gp, sp, dp, cpt, mx):
-        
-        if luid == 0:
-            print("per_block_finalization")
+        dt = td[1] - td[0]
+        td[0] += 1.0 * dt
+        td[1] += 1.0 * dt
 
     @cuda.jit(__ODE_FUN_SIGNATURE, device=True, inline=True)
     def per_block_ode_function(ups, gsid, luid, t, dx, x, cpf, up, gp, sp, dp, cpt, mx):
@@ -129,6 +130,9 @@ def setup(k, ac_field):
         luid - Local Unit ID
         dx   - Explicit derivative terms! (Threads do not communicate here)
         """
+
+        #if gsid == 0:
+        #    print("luid ", luid,", t=", t,", x[0]=", x[0], ", x[1]=", x[1], ", x[2]=", x[2], ", x[3]=", x[3])
 
         rx0 = 1.0 / x[0]
         p = rx0**gp[0]
@@ -170,16 +174,6 @@ def setup(k, ac_field):
         cpt[5, luid] = x[0]**2
         cpt[6, luid] = x[0]**3
         cpt[7, luid] = x[1]               # Bubble positions
-
-        #print(gsid)
-
-        if (luid == 0):
-            #print(dx[0])
-            #print(dx[1])
-            #print(dx[2])
-            #print(dx[3])
-            pass
-            # Debug print
 
 
     @cuda.jit(__ODE_FUN_SIGNATURE, device=True, inline=True)
@@ -231,7 +225,7 @@ def setup(k, ac_field):
             )
 
             sum_rad_g1 += m0 * (
-                -0.5 * sr_delta2 * h2
+                -0.5 * sr_delta2 * h1
                 -0.5 * r_delta3  * h3
             )
 
@@ -271,7 +265,7 @@ def setup(k, ac_field):
             xj    = cpt[7, j]                       # Coupled bubble position
             delta = math.fabs(xi - xj)              # Dimensionless Distance
             m     = 1.0 - nb.float64(luid == j)     # Diagonal Mask
-            r_delta = m / max(delta, 1e-30)         # Avoid division by 0
+            r_delta = m / max(delta, 1e-300)        # Avoid division by 0
             s = nb.float64((luid>j) - (j>luid))     # sign(d)
             r_delta2 = r_delta * r_delta
             sr_delta2 = r_delta2 * s
@@ -283,10 +277,9 @@ def setup(k, ac_field):
             vr = v[0, j]          # v[:num_bubbles]
             vt = v[1, j]          # v[num_bubbles:]
 
-            # TODO: implement calculation here
             av_rad += m0 * (
-                    r_delta   * h5 * vr
-                +   sr_delta2 * h6 * vt
+                       r_delta   * h5 * vr
+                +0.5 * sr_delta2 * h6 * vt
             )
 
             av_trn += -m1 * (
@@ -299,13 +292,51 @@ def setup(k, ac_field):
         Av[1, luid] = av_trn + v[1, luid]
 
 
-        
+    @cuda.jit(__EVENT_FUN_SIGNATURE, device=True, inline=True)
+    def per_block_event_function(ups, gsid, lsid, luid, t, x, sx, ev, up, gp, sp, dp):
+        # Share unit parameters
+        sx[0, luid] = x[0] * up[12] 
+        sx[1, luid] = x[1] 
+        cuda.syncthreads()
+
+        if luid < ups - 1:
+            ri = sx[0, luid]
+            rj = sx[0, luid + 1]
+            xi = sx[1, luid]
+            xj = sx[1, luid + 1]
+            #gap = math.fabs(xi - xj) - (ri + rj) * 1.25
+            gap = 1.0 - (math.fabs(xi - xj) / (ri + rj))*1.15
+        else:
+            gap = 1e30
+
+        cuda.atomic.min(ev, 0, gap)
+
+
+        #if luid == 0:
+        #    min_distance = 1e30
+        #    for i in range(ups-1):
+        #        ri = sx[0, i]
+        #        rj = sx[0, i+1]
+        #        xi = sx[1, i]
+        #        xj = sx[1, i+1]
+        #        min_distance = min(min_distance, math.fabs(xi - xj)*0.9 - (ri + rj))
+        #    ev[0] = min_distance
+        cuda.syncthreads()
+
+
+    @cuda.jit(__EVENT_ACTION_FUN_SIGNATURE, device=True, inline=True)
+    def per_block_action_after_event_detection(gsid, lsid, luid, t, x, up, gp, sp, dp, events, terminal):
+        if (events[0] == 1) and (luid == 0):
+            terminal[lsid] = 1
+
     functions = {
         "per_block_ode_function"      : per_block_ode_function,
         "per_block_initialization"    : per_block_initialization,
         "per_block_finalization"      : per_block_finalization,
         "per_block_explicit_coupling" : per_block_explicit_coupling,
-        "per_block_implicit_mat_vec"  : per_block_implicit_mat_vec
+        "per_block_implicit_mat_vec"  : per_block_implicit_mat_vec,
+        "per_block_event_function"    : per_block_event_function,
+        "per_block_action_after_event_detection" : per_block_action_after_event_detection
     }
 
     return functions
